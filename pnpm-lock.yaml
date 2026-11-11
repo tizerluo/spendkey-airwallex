@@ -36,6 +36,12 @@ importers:
         specifier: workspace:*
         version: link:../schema
 
+  packages/offers:
+    dependencies:
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
+
   packages/schema:
     dependencies:
       zod:

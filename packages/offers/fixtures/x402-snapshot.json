@@ -1,0 +1,44 @@
+[
+  {
+    "resource": "https://api.weather.example.com/weather/current",
+    "description": "Current weather conditions for a city",
+    "priceUsdc": "0.001",
+    "network": "celo",
+    "capturedAt": "2026-10-25T12:00:00.000Z"
+  },
+  {
+    "resource": "https://api.translate.example.com/translate/text",
+    "description": "Translate text between two languages",
+    "priceUsdc": "0.002",
+    "network": "celo",
+    "capturedAt": "2026-10-25T12:00:00.000Z"
+  },
+  {
+    "resource": "https://api.ocr.example.com/ocr/image",
+    "description": "Extract text from an image with OCR",
+    "priceUsdc": "0.0035",
+    "network": "celo",
+    "capturedAt": "2026-10-25T12:00:00.000Z"
+  },
+  {
+    "resource": "https://api.geocode.example.com/geocode/address",
+    "description": "Resolve a street address to coordinates",
+    "priceUsdc": "0.0015",
+    "network": "celo",
+    "capturedAt": "2026-10-25T12:00:00.000Z"
+  },
+  {
+    "resource": "https://api.summarize.example.com/summarize/text",
+    "description": "Summarize a long document",
+    "priceUsdc": "0.004",
+    "network": "celo",
+    "capturedAt": "2026-10-25T12:00:00.000Z"
+  },
+  {
+    "resource": "https://api.search.example.com/search/web",
+    "description": "Run a web search query",
+    "priceUsdc": "0.0025",
+    "network": "celo",
+    "capturedAt": "2026-10-25T12:00:00.000Z"
+  }
+]
