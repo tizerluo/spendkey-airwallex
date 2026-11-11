@@ -73,18 +73,30 @@ Run `pnpm --filter @sk/airwallex test`, `build`, `typecheck` or `lint` from the 
   enforcement from this result. Confirm with a subsequent card read.
 
 Every HTTP 2xx is retained as success, including empty/non-JSON bodies and failed
-body streams (`raw: { bodyReadFailed: true }`). No response-schema failure retries
-issuance or throws after a 2xx. Transport failures and non-2xx still throw.
+body streams (`raw: { bodyReadFailed: true }`). A non-JSON 2xx is unconfirmed and
+stored only as `{ nonJson: true, length, head }`, where `length` is the original
+body length and `head` is the first 200 characters after redaction. Key/value
+assignments whose names contain `pan`, `card_number`, `cvv`, `cvc`, `token`,
+`secret`, `key`, `password`, `auth`, `security`, or `verification` are scrubbed
+before that cut. No response-schema failure retries issuance or throws after a
+2xx. Transport failures and non-2xx still throw.
 Persist the result's `raw` with the approval/request ID before continuing; the
 client returns evidence and does not write logs or storage itself. Raw diagnostics
 recursively drop keys matching
-`/pan|card_number(?!_masked)|cvv|cvc|token|secret|key|password|auth|credential|security_code|expir/i`,
-the whole key `pin`, and a `number` key whose value is digit-like.
-`masked_card_number` and `authorization_controls` are kept. Digit runs of 13 or
-more are replaced, including numeric values, as are 13–19 digit runs with a
-single space or dash between digits. Current and previous authentication tokens
-and runtime credentials are scrubbed. Consequently raw `card_number` is omitted
-even when masked; the parsed card may safely keep a mask of at most 12 digits.
+`/pan|card_number(?!_masked)|cvv|cvc|token|secret|key|password|auth|credential|security|verification|expir/i`
+(case-insensitive), the whole key `pin`, and a `number` key whose value is digit-like.
+`masked_card_number` and `authorization_controls` are kept, also case-insensitively.
+A string with 13 or more digits and no mask character is replaced entirely.
+Digit runs of 13 or more are replaced, including numeric values, as are 13–19
+digit runs separated by up to two non-letters or the mask letters `x`/`X`
+(so `.`, `/`, `_`, and repeated spaces cannot hide a PAN under a kept key).
+A string value that starts with `{` or `[` is parsed and walked, so credentials
+embedded as JSON text are dropped by key. Current and previous authentication
+tokens and runtime credentials are scrubbed. Consequently raw `card_number` is
+omitted even when masked; the parsed card may safely keep a mask of at most 12
+digits. A PAN-like value that fails that mask rule is dropped and flagged with
+`panLikeValueDropped`, including values that contain a mask character but still
+have 13 or more digits.
 
 `listCards({ cardholderId?, createdAfter?, createdBefore?, updatedAfter?,
 updatedBefore?, status?, nickName?, pageSize? })` collects all pages into
@@ -92,10 +104,10 @@ updatedBefore?, status?, nickName?, pageSize? })` collects all pages into
 `findCardByRequestId(requestId, { cardholderId?, createdAfter? })` scans those pages,
 prefers a matching `request_id` when returned, and otherwise matches the exact
 `cardNicknameFromRequestId(requestId)` only on rows without a request ID.
-If `spk ${requestId}` is longer than 50 characters, that nickname would be
-truncated, so recovery does not use it and returns only an explicit `request_id`
-match. An explicit conflicting ID never matches by nickname. No match returns
-`undefined`.
+Several explicit `request_id` matches return the first. If `spk ${requestId}` is
+longer than 50 characters, that nickname would be truncated, so recovery does not
+use it and returns only an explicit `request_id` match. An explicit conflicting
+ID never matches by nickname. No match returns `undefined`.
 The approval mapper sets that same nickname (`spk ${requestId}`), ignoring the
 legacy `nickName` option, so recovery works even if the API omits `request_id`.
 
@@ -107,13 +119,20 @@ confirms `GET /api/v1/issuing/cards`, zero-based `page_num`, `page_size` 10–20
 `card_status`. Responses normally have `items` and `has_more`. Recovery also
 accepts a `data` or `results` array when `items` is absent. A missing `has_more`
 stops once a page is empty or shorter than `pageSize`. An empty page stops even
-when `has_more` is true. More than 200 pages throws `AirwallexSafetyError`.
+when `has_more` is true. A page whose first `card_id` repeats the previous page's
+first `card_id` stops immediately, so a server that ignores `page_num` does not
+run out the cap. More than 200 distinct pages throws `AirwallexSafetyError` from
+`listCards`. `findCardByRequestId` does not throw on that cap: it returns a match
+already seen and sets `listTruncated: true` on that card. The flag is not an API
+field. A truncated scan with no match still returns `undefined`.
 There is no documented
 `request_id` query parameter or list-response field; if returned, we retain it.
-The endpoint defaults to a 30-day window unless **both** creation bounds are set.
-Recovery with `createdAfter` therefore also supplies the injected clock's current
-time as `to_created_at`; without it, recovery uses the API's default window.
-Use explicit creation bounds with `listCards` for older archived cards.
+The list endpoint applies a default window unless **both** creation bounds are
+set (`from_created_at` and `to_created_at`). Recovery therefore sends
+`to_created_at` only when the caller passes `createdAfter`, using the injected
+clock as the upper bound. Without `createdAfter`, recovery uses the API's default
+window and does not invent `createdBefore`. Use explicit creation bounds with
+`listCards` for older archived cards.
 
 The [Create a Card reference](https://www.airwallex.com/docs/api/issuing/cards/create)
 describes `nick_name` as a string but publishes no maximum length. We could not
@@ -132,7 +151,10 @@ redaction; other rows and page metadata remain available. A usable row requires
 other modeled fields may be absent. No assumption joins `transaction_id` to
 `card_transaction_id` until the live response confirms it. `transaction_amount`
 keeps the API value and its original sign. `signedAmount` is derived from
-`transaction_type`: `REFUND` and `REVERSAL` with a positive API amount become
-negative, and every other row copies `transaction_amount`. Simulations keep both card
-transaction IDs and full merchant fields, tolerate future result strings and
-missing/invalid optional fields, and retain unknown fields in redacted `extra`.
+`transaction_type`, compared case-insensitively: `REFUND`, `REVERSAL`, and any
+type ending in `_REVERSAL` (for example `CLEARING_REVERSAL`) with a positive API
+amount become negative. Every other row copies `transaction_amount`. Simulations
+keep both card transaction IDs and full merchant fields, tolerate future result
+strings and missing/invalid optional fields, and retain unknown fields in redacted
+`extra`. A missing `process_result` is unknown, not approved; an error-shaped 200
+parses with `process_result` left unset.

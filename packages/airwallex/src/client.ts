@@ -3,7 +3,7 @@ import type { z } from 'zod';
 import { configApiKey } from './config.js';
 import type { AirwallexConfig } from './config.js';
 import { AirwallexApiError, AirwallexResponseError, AirwallexSafetyError } from './errors.js';
-import { redactBody } from './redact.js';
+import { nonJsonDiagnostic, redactBody } from './redact.js';
 import {
   authorizationControlsInputSchema, balancesSchema, cardholderInputSchema, cardholderSchema,
   cardLimitsSchema, cardSchema, cardStatusSchema, createCardInputSchema, issuingConfigSchema,
@@ -12,7 +12,7 @@ import {
 } from './schemas.js';
 import type {
   AuthorizationControls, CardStatus, CreateCardholderInput, CreateCardInput,
-  CardsResponse, CreateCardResult, ListCardsInput, ListTransactionsInput, SimulateAuthorizationInput,
+  Card, CardsResponse, CreateCardResult, ListCardsInput, ListTransactionsInput, SimulateAuthorizationInput,
 } from './schemas.js';
 
 export interface AirwallexClientOptions {
@@ -57,6 +57,14 @@ export function assertSafeCardPath(path: string): void {
   if (/\/issuing\/cards(?:\/|$)/.test(decoded) && decoded.includes('/details')) {
     throw new AirwallexSafetyError('Card details access is forbidden');
   }
+}
+
+/** 用原始条目的 card_id 判断下一页是不是上一页的重复。 */
+function firstCardId(items: unknown[]): string | undefined {
+  const first = items[0];
+  if (first === undefined || first === null || typeof first !== 'object' || Array.isArray(first)) return undefined;
+  const id = (first as Record<string, unknown>)['card_id'];
+  return typeof id === 'string' && id.length > 0 ? id : undefined;
 }
 
 export class AirwallexClient {
@@ -207,7 +215,10 @@ export class AirwallexClient {
     try {
       const text = await response.text();
       try { received = JSON.parse(text) as unknown; }
-      catch { received = text; }
+      catch {
+        // 非 JSON 的 2xx 不能原样留下 key=value 凭证，只保留长度和脱敏后的前 200 字。
+        received = nonJsonDiagnostic(this.#redact(text), text.length);
+      }
     } catch { received = { bodyReadFailed: true }; }
     const raw = redactBody(received, text => this.#redact(text));
     const strict = cardSchema.safeParse(received);
@@ -217,7 +228,11 @@ export class AirwallexClient {
   }
 
   /** Collect every page; malformed individual cards remain available as redacted diagnostics. */
-  async listCards(input: ListCardsInput = {}): Promise<CardsResponse> {
+  listCards(input: ListCardsInput = {}): Promise<CardsResponse> {
+    return this.#collectCards(input, 'throw');
+  }
+
+  async #collectCards(input: ListCardsInput, onCap: 'throw' | 'truncate'): Promise<CardsResponse & { truncated?: true }> {
     const pageSize = input.pageSize ?? 100;
     if (!Number.isInteger(pageSize) || pageSize < 10 || pageSize > 200) throw new AirwallexSafetyError('Invalid card page size');
     const query = new URLSearchParams({ page_size: String(pageSize) });
@@ -229,9 +244,14 @@ export class AirwallexClient {
     const result: CardsResponse = { items: [], unparsed: [] };
     // 硬上限：服务端一直声称还有下一页时必须停，不能无限翻页。
     const maxPages = 200;
+    let previousFirstId: string | undefined;
     for (let page = 0; page < maxPages; page++) {
       query.set('page_num', String(page));
       const response = await this.#request('GET', `/api/v1/issuing/cards?${query.toString()}`, cardsPageSchema);
+      const firstId = firstCardId(response.items);
+      // 忽略 page_num 时会重复上一页的第一张卡，立刻停，避免打满 200 次请求。
+      if (previousFirstId !== undefined && firstId === previousFirstId) return result;
+      previousFirstId = firstId;
       for (const item of response.items) {
         const card = parseCardLenient(item);
         if (card) result.items.push(card);
@@ -241,18 +261,24 @@ export class AirwallexClient {
       const more = response.has_more === true || (response.has_more === undefined && fullPage);
       if (!more || response.items.length === 0) return result;
     }
+    if (onCap === 'truncate') return { ...result, truncated: true };
     throw new AirwallexSafetyError('Card list page cap exceeded');
   }
 
-  async findCardByRequestId(requestId: string, input: Pick<ListCardsInput, 'cardholderId' | 'createdAfter'> = {}) {
-    const cards = await this.listCards({ ...input,
+  async findCardByRequestId(requestId: string, input: Pick<ListCardsInput, 'cardholderId' | 'createdAfter'> = {}): Promise<(Card & { listTruncated?: true }) | undefined> {
+    // 列表接口要同时有创建时间上下界才不用默认窗口。只有 createdAfter 时才补上当前时刻。
+    const cards = await this.#collectCards({ ...input,
       ...(input.createdAfter === undefined ? {} : { createdBefore: new Date(this.#now()).toISOString() }),
-    });
+    }, 'truncate');
+    // 多条明确的 request_id 只返回第一条。
     const explicit = cards.items.find(card => card.request_id === requestId);
-    if (explicit) return explicit;
     // 昵称会被截到 50 字符。截断后不同 requestId 会撞车，这时只认明确的 request_id。
-    if (`spk ${requestId}`.length > CARD_NICKNAME_MAX_LENGTH) return undefined;
-    return cards.items.find(card => card.request_id === undefined && card.nick_name === cardNicknameFromRequestId(requestId));
+    const matched = explicit ?? (`spk ${requestId}`.length > CARD_NICKNAME_MAX_LENGTH ? undefined
+      : cards.items.find(card => card.request_id === undefined && card.nick_name === cardNicknameFromRequestId(requestId)));
+    if (matched === undefined) return undefined;
+    // 页数打满时仍交回已经看到的匹配，并标上截断，避免直接抛错把恢复结果丢掉。
+    if (cards.truncated === true) return { ...matched, listTruncated: true };
+    return matched;
   }
   getCard(id: string) { return this.#request('GET', this.#cardPath(id), cardSchema); }
   getCardLimits(id: string) { return this.#request('GET', this.#cardPath(id, '/limits'), cardLimitsSchema); }
