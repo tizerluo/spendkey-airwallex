@@ -1,0 +1,12 @@
+{
+  "url": "https://mock.example/tools/lookup",
+  "quote": {
+    "amountAtomic": 0.005,
+    "asset": "0x1111111111111111111111111111111111111111",
+    "network": "eip155:42220",
+    "payTo": "0x2222222222222222222222222222222222222222"
+  },
+  "intent": "Look up a mock record",
+  "maxSpend": "0.025",
+  "payer": "0x1111111111111111111111111111111111111111"
+}

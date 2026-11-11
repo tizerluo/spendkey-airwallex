@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Content hashes of generated schema artifacts are not secrets"
+paths = ['''packages/schema/schema\.lock''', '''pnpm-lock\.yaml''']

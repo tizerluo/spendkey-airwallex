@@ -1,0 +1,255 @@
+{
+  "id": "mock-plan",
+  "action": "pay",
+  "reasons": [
+    "Within the mock budget"
+  ],
+  "decider": {
+    "provider": "rules",
+    "model": "rules-v1",
+    "transport": "rules",
+    "probs": {
+      "spend": {
+        "pay": 0.8,
+        "refuse": 0.1,
+        "ask": 0.1
+      },
+      "route": 0.9,
+      "risk": 0.05
+    },
+    "fallback": true
+  },
+  "steps": [
+    {
+      "call": {
+        "url": "https://mock.example/tools/lookup",
+        "method": "POST",
+        "body": {
+          "query": "mock"
+        },
+        "source": "buy",
+        "toolId": "lookup",
+        "bodyHash": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "pay": {
+        "x402Version": 1,
+        "network": "celo",
+        "asset": "0x1111111111111111111111111111111111111111",
+        "payTo": "0x2222222222222222222222222222222222222222",
+        "maxAmountAtomic": "5000",
+        "scoreable": true
+      }
+    },
+    {
+      "call": {
+        "url": "https://mock.example/tools/lookup",
+        "method": "POST",
+        "body": {
+          "query": "mock"
+        },
+        "source": "buy",
+        "toolId": "lookup",
+        "bodyHash": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "pay": {
+        "x402Version": 1,
+        "network": "celo",
+        "asset": "0x1111111111111111111111111111111111111111",
+        "payTo": "0x2222222222222222222222222222222222222222",
+        "maxAmountAtomic": "5000",
+        "scoreable": true
+      }
+    },
+    {
+      "call": {
+        "url": "https://mock.example/tools/lookup",
+        "method": "POST",
+        "body": {
+          "query": "mock"
+        },
+        "source": "buy",
+        "toolId": "lookup",
+        "bodyHash": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "pay": {
+        "x402Version": 1,
+        "network": "celo",
+        "asset": "0x1111111111111111111111111111111111111111",
+        "payTo": "0x2222222222222222222222222222222222222222",
+        "maxAmountAtomic": "5000",
+        "scoreable": true
+      }
+    },
+    {
+      "call": {
+        "url": "https://mock.example/tools/lookup",
+        "method": "POST",
+        "body": {
+          "query": "mock"
+        },
+        "source": "buy",
+        "toolId": "lookup",
+        "bodyHash": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "pay": {
+        "x402Version": 1,
+        "network": "celo",
+        "asset": "0x1111111111111111111111111111111111111111",
+        "payTo": "0x2222222222222222222222222222222222222222",
+        "maxAmountAtomic": "5000",
+        "scoreable": true
+      }
+    },
+    {
+      "call": {
+        "url": "https://mock.example/tools/lookup",
+        "method": "POST",
+        "body": {
+          "query": "mock"
+        },
+        "source": "buy",
+        "toolId": "lookup",
+        "bodyHash": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "pay": {
+        "x402Version": 1,
+        "network": "celo",
+        "asset": "0x1111111111111111111111111111111111111111",
+        "payTo": "0x2222222222222222222222222222222222222222",
+        "maxAmountAtomic": "5000",
+        "scoreable": true
+      }
+    },
+    {
+      "call": {
+        "url": "https://mock.example/tools/lookup",
+        "method": "POST",
+        "body": {
+          "query": "mock"
+        },
+        "source": "buy",
+        "toolId": "lookup",
+        "bodyHash": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "pay": {
+        "x402Version": 1,
+        "network": "celo",
+        "asset": "0x1111111111111111111111111111111111111111",
+        "payTo": "0x2222222222222222222222222222222222222222",
+        "maxAmountAtomic": "5000",
+        "scoreable": true
+      }
+    },
+    {
+      "call": {
+        "url": "https://mock.example/tools/lookup",
+        "method": "POST",
+        "body": {
+          "query": "mock"
+        },
+        "source": "buy",
+        "toolId": "lookup",
+        "bodyHash": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "pay": {
+        "x402Version": 1,
+        "network": "celo",
+        "asset": "0x1111111111111111111111111111111111111111",
+        "payTo": "0x2222222222222222222222222222222222222222",
+        "maxAmountAtomic": "5000",
+        "scoreable": true
+      }
+    },
+    {
+      "call": {
+        "url": "https://mock.example/tools/lookup",
+        "method": "POST",
+        "body": {
+          "query": "mock"
+        },
+        "source": "buy",
+        "toolId": "lookup",
+        "bodyHash": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "pay": {
+        "x402Version": 1,
+        "network": "celo",
+        "asset": "0x1111111111111111111111111111111111111111",
+        "payTo": "0x2222222222222222222222222222222222222222",
+        "maxAmountAtomic": "5000",
+        "scoreable": true
+      }
+    },
+    {
+      "call": {
+        "url": "https://mock.example/tools/lookup",
+        "method": "POST",
+        "body": {
+          "query": "mock"
+        },
+        "source": "buy",
+        "toolId": "lookup",
+        "bodyHash": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "pay": {
+        "x402Version": 1,
+        "network": "celo",
+        "asset": "0x1111111111111111111111111111111111111111",
+        "payTo": "0x2222222222222222222222222222222222222222",
+        "maxAmountAtomic": "5000",
+        "scoreable": true
+      }
+    },
+    {
+      "call": {
+        "url": "https://mock.example/tools/lookup",
+        "method": "POST",
+        "body": {
+          "query": "mock"
+        },
+        "source": "buy",
+        "toolId": "lookup",
+        "bodyHash": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "pay": {
+        "x402Version": 1,
+        "network": "celo",
+        "asset": "0x1111111111111111111111111111111111111111",
+        "payTo": "0x2222222222222222222222222222222222222222",
+        "maxAmountAtomic": "5000",
+        "scoreable": true
+      }
+    },
+    {
+      "call": {
+        "url": "https://mock.example/tools/lookup",
+        "method": "POST",
+        "body": {
+          "query": "mock"
+        },
+        "source": "buy",
+        "toolId": "lookup",
+        "bodyHash": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "pay": {
+        "x402Version": 1,
+        "network": "celo",
+        "asset": "0x1111111111111111111111111111111111111111",
+        "payTo": "0x2222222222222222222222222222222222222222",
+        "maxAmountAtomic": "5000",
+        "scoreable": true
+      }
+    }
+  ],
+  "attribution": {
+    "erc8021": [
+      "spend-router-mock"
+    ]
+  },
+  "expiresAt": "2026-10-12T12:00:00Z",
+  "auditHash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+  "prevHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "sig": "0x4444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444",
+  "payer": "0x1111111111111111111111111111111111111111",
+  "nonce": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+}

@@ -1,0 +1,20 @@
+{
+  "call": {
+    "url": "https://mock.example/tools/lookup",
+    "method": "POST",
+    "body": {
+      "query": "mock"
+    },
+    "source": "buy",
+    "toolId": "lookup",
+    "bodyHash": "0\u00780000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "pay": {
+    "x402Version": 1,
+    "network": "eip155:42220",
+    "asset": "0x1111111111111111111111111111111111111111",
+    "payTo": "0x2222222222222222222222222222222222222222",
+    "maxAmountAtomic": "5000",
+    "scoreable": true
+  }
+}

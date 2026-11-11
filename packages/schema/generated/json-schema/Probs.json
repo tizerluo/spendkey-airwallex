@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:sr:schema:1.0.0:Probs",
+  "title": "Probs",
+  "type": "object",
+  "additionalProperties": {
+    "anyOf": [
+      {
+        "$ref": "#/definitions/Probability"
+      },
+      {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/definitions/Probability"
+        }
+      }
+    ]
+  },
+  "definitions": {
+    "Probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

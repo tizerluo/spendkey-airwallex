@@ -1,0 +1,26 @@
+{
+  "name": "@sr/schema",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && pnpm check-lock",
+    "lint": "eslint .",
+    "gen": "pnpm build && node dist/generate.js",
+    "check-lock": "pnpm build && node dist/generate.js --check"
+  },
+  "dependencies": {
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "ajv": "6.15.0"
+  }
+}

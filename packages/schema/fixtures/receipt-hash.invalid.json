@@ -1,0 +1,5 @@
+{
+  "planId": "mock-plan",
+  "tx": "0x123",
+  "network": "eip155:42220"
+}

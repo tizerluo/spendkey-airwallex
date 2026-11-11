@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:sr:schema:1.0.0:DecisionChain",
+  "title": "DecisionChain",
+  "type": "object",
+  "properties": {
+    "chain": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/DecisionProviderId"
+      },
+      "minItems": 1,
+      "maxItems": 7
+    },
+    "note": {
+      "type": "string",
+      "const": "Configured order. Providers without credentials on this deployment are skipped; rules always runs last."
+    }
+  },
+  "required": [
+    "chain",
+    "note"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "DecisionProviderId": {
+      "type": "string",
+      "pattern": "^(?:rules|typesafe:[A-Za-z0-9._-]+|openrouter:[a-z0-9-]+\\/[A-Za-z0-9._-]+(?::free)?|fastino:[a-z0-9-]+\\/[A-Za-z0-9._-]+)$"
+    }
+  }
+}

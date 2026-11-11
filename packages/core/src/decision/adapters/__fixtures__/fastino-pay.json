@@ -1,0 +1,9 @@
+{
+  "model": "fastino/GLiDE",
+  "answers": {
+    "spend": { "type": "noul", "noul": 0.92, "confidence": 0.95 },
+    "risk": { "type": "noul", "noul": 0.08, "confidence": 0.9 }
+  },
+  "usage": { "input_tokens": 300, "output_tokens": 20 },
+  "token_usage": { "input_tokens": 300, "output_tokens": 20 }
+}

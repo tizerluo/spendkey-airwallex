@@ -1,0 +1,4 @@
+{
+  "required": true,
+  "approveUrl": "javascript:alert(1)"
+}

@@ -1,0 +1,9 @@
+{
+  "provider": "rules",
+  "model": "rules-v1",
+  "transport": "rules",
+  "probs": {
+    "spend": 1.01
+  },
+  "fallback": true
+}

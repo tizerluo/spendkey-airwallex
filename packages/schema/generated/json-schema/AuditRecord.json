@@ -1,0 +1,401 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:sr:schema:1.0.0:AuditRecord",
+  "title": "AuditRecord",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "planId": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "budgetKey": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "payer": {
+          "$ref": "#/definitions/Address"
+        },
+        "timestamp": {
+          "$ref": "#/definitions/Timestamp"
+        },
+        "hash": {
+          "$ref": "#/definitions/Hash"
+        },
+        "prevHash": {
+          "$ref": "#/definitions/Hash"
+        },
+        "stateHash": {
+          "$ref": "#/definitions/Hash"
+        },
+        "kind": {
+          "type": "string",
+          "const": "plan"
+        },
+        "decision": {
+          "$ref": "#/definitions/Decision"
+        },
+        "decider": {
+          "$ref": "#/definitions/Decider"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Identifier"
+          }
+        },
+        "savedAmountAtomic": {
+          "$ref": "#/definitions/AtomicAmount"
+        }
+      },
+      "required": [
+        "id",
+        "planId",
+        "budgetKey",
+        "seq",
+        "payer",
+        "timestamp",
+        "hash",
+        "prevHash",
+        "kind",
+        "decision",
+        "decider",
+        "rules",
+        "savedAmountAtomic"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "planId": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "budgetKey": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "payer": {
+          "$ref": "#/definitions/Address"
+        },
+        "timestamp": {
+          "$ref": "#/definitions/Timestamp"
+        },
+        "hash": {
+          "$ref": "#/definitions/Hash"
+        },
+        "prevHash": {
+          "$ref": "#/definitions/Hash"
+        },
+        "stateHash": {
+          "$ref": "#/definitions/Hash"
+        },
+        "kind": {
+          "type": "string",
+          "const": "guard"
+        },
+        "decision": {
+          "$ref": "#/definitions/Decision"
+        },
+        "decider": {
+          "$ref": "#/definitions/Decider"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Identifier"
+          }
+        },
+        "savedAmountAtomic": {
+          "$ref": "#/definitions/AtomicAmount"
+        }
+      },
+      "required": [
+        "id",
+        "planId",
+        "budgetKey",
+        "seq",
+        "payer",
+        "timestamp",
+        "hash",
+        "prevHash",
+        "kind",
+        "decision",
+        "decider",
+        "rules",
+        "savedAmountAtomic"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "planId": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "budgetKey": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "payer": {
+          "$ref": "#/definitions/Address"
+        },
+        "timestamp": {
+          "$ref": "#/definitions/Timestamp"
+        },
+        "hash": {
+          "$ref": "#/definitions/Hash"
+        },
+        "prevHash": {
+          "$ref": "#/definitions/Hash"
+        },
+        "stateHash": {
+          "$ref": "#/definitions/Hash"
+        },
+        "kind": {
+          "type": "string",
+          "const": "receipt"
+        },
+        "receipt": {
+          "$ref": "#/definitions/Receipt"
+        }
+      },
+      "required": [
+        "id",
+        "planId",
+        "budgetKey",
+        "seq",
+        "payer",
+        "timestamp",
+        "hash",
+        "prevHash",
+        "kind",
+        "receipt"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "planId": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "budgetKey": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "payer": {
+          "$ref": "#/definitions/Address"
+        },
+        "timestamp": {
+          "$ref": "#/definitions/Timestamp"
+        },
+        "hash": {
+          "$ref": "#/definitions/Hash"
+        },
+        "prevHash": {
+          "$ref": "#/definitions/Hash"
+        },
+        "stateHash": {
+          "$ref": "#/definitions/Hash"
+        },
+        "kind": {
+          "type": "string",
+          "const": "approval"
+        },
+        "decision": {
+          "$ref": "#/definitions/Decision"
+        },
+        "decider": {
+          "$ref": "#/definitions/Decider"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Identifier"
+          }
+        },
+        "savedAmountAtomic": {
+          "$ref": "#/definitions/AtomicAmount"
+        }
+      },
+      "required": [
+        "id",
+        "planId",
+        "budgetKey",
+        "seq",
+        "payer",
+        "timestamp",
+        "hash",
+        "prevHash",
+        "kind",
+        "decision",
+        "decider",
+        "rules",
+        "savedAmountAtomic"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "definitions": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1
+    },
+    "Address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^((\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\\d|3[01])|(0[469]|11)-(0[1-9]|[12]\\d|30)|(02)-(0[1-9]|1\\d|2[0-8])))T([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d(\\.\\d+)?)?(Z|([+-]\\d{2}:?\\d{2}))$"
+    },
+    "Hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$"
+    },
+    "Decision": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/Action"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Identifier"
+          }
+        },
+        "probs": {
+          "$ref": "#/definitions/Probs"
+        }
+      },
+      "required": [
+        "action",
+        "reasons",
+        "probs"
+      ],
+      "additionalProperties": false
+    },
+    "Decider": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "$ref": "#/definitions/DecisionProviderId"
+        },
+        "model": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "systemone",
+            "openai-decisions",
+            "chat-json",
+            "rules"
+          ]
+        },
+        "probs": {
+          "$ref": "#/definitions/Probs"
+        },
+        "confidence": {
+          "$ref": "#/definitions/Probability"
+        },
+        "fallback": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "transport",
+        "probs",
+        "fallback"
+      ],
+      "additionalProperties": false
+    },
+    "AtomicAmount": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "Receipt": {
+      "type": "object",
+      "properties": {
+        "planId": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "tx": {
+          "$ref": "#/definitions/Hash"
+        },
+        "network": {
+          "type": "string",
+          "const": "eip155:42220"
+        }
+      },
+      "required": [
+        "planId",
+        "tx",
+        "network"
+      ],
+      "additionalProperties": false
+    },
+    "Action": {
+      "type": "string",
+      "enum": [
+        "pay",
+        "refuse",
+        "ask"
+      ]
+    },
+    "Probs": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/definitions/Probability"
+          },
+          {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/definitions/Probability"
+            }
+          }
+        ]
+      }
+    },
+    "DecisionProviderId": {
+      "type": "string",
+      "pattern": "^(?:rules|typesafe:[A-Za-z0-9._-]+|openrouter:[a-z0-9-]+\\/[A-Za-z0-9._-]+(?::free)?|fastino:[a-z0-9-]+\\/[A-Za-z0-9._-]+)$"
+    },
+    "Probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

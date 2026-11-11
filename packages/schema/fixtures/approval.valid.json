@@ -1,0 +1,4 @@
+{
+  "required": true,
+  "approveUrl": "https://mock.example/v1/plans/mock-plan/approve"
+}

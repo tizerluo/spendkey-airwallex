@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:sr:schema:1.0.0:Attribution",
+  "title": "Attribution",
+  "type": "object",
+  "properties": {
+    "erc8021": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 32,
+        "pattern": "^[\\x20-\\x7E]+$(?![\\s\\S])"
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "erc8021"
+  ],
+  "additionalProperties": false
+}

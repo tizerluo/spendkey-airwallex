@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:sr:schema:1.0.0:ProviderStats",
+  "title": "ProviderStats",
+  "type": "object",
+  "properties": {
+    "provider": {
+      "$ref": "#/definitions/DecisionProviderId"
+    },
+    "calls": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "latencyMs": {
+      "type": "number",
+      "minimum": 0
+    },
+    "fallbackRate": {
+      "$ref": "#/definitions/Probability"
+    }
+  },
+  "required": [
+    "provider",
+    "calls",
+    "latencyMs",
+    "fallbackRate"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "DecisionProviderId": {
+      "type": "string",
+      "pattern": "^(?:rules|typesafe:[A-Za-z0-9._-]+|openrouter:[a-z0-9-]+\\/[A-Za-z0-9._-]+(?::free)?|fastino:[a-z0-9-]+\\/[A-Za-z0-9._-]+)$"
+    },
+    "Probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

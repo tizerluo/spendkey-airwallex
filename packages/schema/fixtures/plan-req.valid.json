@@ -1,0 +1,17 @@
+{
+  "intent": "Look up a mock record",
+  "tool": "lookup",
+  "input": {
+    "query": "mock"
+  },
+  "maxSpend": "0.025",
+  "payer": "0x1111111111111111111111111111111111111111",
+  "prefer": {
+    "celoOnly": true,
+    "providers": [
+      "buy",
+      "agent402"
+    ]
+  },
+  "budgetKey": "mock-budget"
+}

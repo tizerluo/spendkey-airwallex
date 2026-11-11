@@ -1,0 +1,4 @@
+{
+  "required": true,
+  "approveUrl": "http://mock.example/tools/lookup"
+}

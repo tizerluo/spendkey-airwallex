@@ -1,0 +1,61 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "http://json-schema.org/draft-07/schema#",
+  "info": {
+    "title": "spendkey decision chain discovery",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/v1/decision-chain": {
+      "get": {
+        "operationId": "getDecisionChain",
+        "description": "Public configured provider order. Does not disclose credential availability or quota.",
+        "responses": {
+          "200": {
+            "description": "Configured decision chain",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionChain"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Decision configuration unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DecisionProviderId": {
+        "type": "string",
+        "pattern": "^(?:rules|typesafe:[A-Za-z0-9._-]+|openrouter:[a-z0-9-]+\\/[A-Za-z0-9._-]+(?::free)?|fastino:[a-z0-9-]+\\/[A-Za-z0-9._-]+)$"
+      },
+      "DecisionChain": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecisionProviderId"
+            },
+            "minItems": 1,
+            "maxItems": 7
+          },
+          "note": {
+            "type": "string",
+            "const": "Configured order. Providers without credentials on this deployment are skipped; rules always runs last."
+          }
+        },
+        "required": [
+          "chain",
+          "note"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

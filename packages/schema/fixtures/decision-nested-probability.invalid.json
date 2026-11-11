@@ -1,0 +1,11 @@
+{
+  "action": "pay",
+  "reasons": [
+    "Within the mock budget"
+  ],
+  "probs": {
+    "spend": {
+      "pay": -0.1
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "provider": "openrouter:inception/mercury-decide:free",
+  "model": "rules-v1",
+  "transport": "rules",
+  "probs": {
+    "spend": {
+      "pay": 0.8,
+      "refuse": 0.1,
+      "ask": 0.1
+    },
+    "route": 0.9,
+    "risk": 0.05
+  },
+  "fallback": true
+}

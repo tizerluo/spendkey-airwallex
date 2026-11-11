@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:sr:schema:1.0.0:PlanReq",
+  "title": "PlanReq",
+  "type": "object",
+  "properties": {
+    "intent": {
+      "$ref": "#/definitions/Identifier"
+    },
+    "tool": {
+      "$ref": "#/definitions/Identifier"
+    },
+    "input": {},
+    "maxSpend": {
+      "$ref": "#/definitions/SpendAmount"
+    },
+    "payer": {
+      "$ref": "#/definitions/Address"
+    },
+    "prefer": {
+      "type": "object",
+      "properties": {
+        "celoOnly": {
+          "type": "boolean"
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Identifier"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "budgetKey": {
+      "$ref": "#/definitions/Identifier"
+    }
+  },
+  "required": [
+    "intent",
+    "maxSpend",
+    "payer"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1
+    },
+    "SpendAmount": {
+      "type": "string",
+      "pattern": "^[0-9]+(?:\\.[0-9]+)?$"
+    },
+    "Address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    }
+  }
+}

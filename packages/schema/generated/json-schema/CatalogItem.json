@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:sr:schema:1.0.0:CatalogItem",
+  "title": "CatalogItem",
+  "type": "object",
+  "properties": {
+    "source": {
+      "$ref": "#/definitions/Source"
+    },
+    "id": {
+      "$ref": "#/definitions/Identifier"
+    },
+    "url": {
+      "$ref": "#/definitions/HttpUrl"
+    },
+    "method": {
+      "$ref": "#/definitions/HttpMethod"
+    },
+    "name": {
+      "$ref": "#/definitions/Identifier"
+    },
+    "description": {
+      "type": "string"
+    },
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": {}
+    },
+    "x402Version": {
+      "anyOf": [
+        {
+          "type": "number",
+          "const": 1
+        },
+        {
+          "type": "number",
+          "const": 2
+        }
+      ]
+    },
+    "celoAssets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Identifier"
+      }
+    },
+    "price": {
+      "$ref": "#/definitions/CatalogPrice"
+    },
+    "payRail": {
+      "type": "string",
+      "enum": [
+        "x402",
+        "prepaid",
+        "card"
+      ]
+    },
+    "celo": {
+      "type": "boolean"
+    },
+    "scoreable": {
+      "type": "boolean"
+    },
+    "trust": {
+      "type": "object",
+      "properties": {
+        "erc8004": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "payers30d": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "requiresSelf": {
+      "type": "boolean"
+    },
+    "async": {
+      "type": "boolean"
+    },
+    "updatedAt": {
+      "$ref": "#/definitions/Timestamp"
+    }
+  },
+  "required": [
+    "source",
+    "id",
+    "url",
+    "method",
+    "x402Version",
+    "celoAssets",
+    "price",
+    "payRail",
+    "celo",
+    "scoreable",
+    "requiresSelf",
+    "async"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "price": {
+            "properties": {
+              "network": {
+                "const": "eip155:42220"
+              }
+            },
+            "required": [
+              "network"
+            ]
+          }
+        },
+        "required": [
+          "price"
+        ]
+      },
+      "then": {
+        "properties": {
+          "celo": {
+            "const": true
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "celo": {
+            "const": false
+          },
+          "scoreable": {
+            "const": false
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "Source": {
+      "type": "string",
+      "enum": [
+        "buy",
+        "agent402",
+        "bazaar"
+      ]
+    },
+    "Identifier": {
+      "type": "string",
+      "minLength": 1
+    },
+    "HttpUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^[hH][tT][tT][pP][sS]?://"
+    },
+    "HttpMethod": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "HEAD",
+        "OPTIONS"
+      ]
+    },
+    "CatalogPrice": {
+      "type": "object",
+      "properties": {
+        "amountAtomic": {
+          "$ref": "#/definitions/AtomicAmount"
+        },
+        "asset": {
+          "$ref": "#/definitions/Address"
+        },
+        "network": {
+          "type": "string",
+          "pattern": "^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$"
+        }
+      },
+      "required": [
+        "amountAtomic",
+        "asset",
+        "network"
+      ],
+      "additionalProperties": false
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^((\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\\d|3[01])|(0[469]|11)-(0[1-9]|[12]\\d|30)|(02)-(0[1-9]|1\\d|2[0-8])))T([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d(\\.\\d+)?)?(Z|([+-]\\d{2}:?\\d{2}))$"
+    },
+    "AtomicAmount": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "Address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    }
+  }
+}

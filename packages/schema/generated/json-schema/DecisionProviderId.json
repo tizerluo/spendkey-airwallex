@@ -1,0 +1,7 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:sr:schema:1.0.0:DecisionProviderId",
+  "title": "DecisionProviderId",
+  "type": "string",
+  "pattern": "^(?:rules|typesafe:[A-Za-z0-9._-]+|openrouter:[a-z0-9-]+\\/[A-Za-z0-9._-]+(?::free)?|fastino:[a-z0-9-]+\\/[A-Za-z0-9._-]+)$"
+}

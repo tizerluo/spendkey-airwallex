@@ -1,0 +1,6 @@
+{
+  "provider": "openrouter:inception/mercury-decide:free",
+  "calls": 10,
+  "latencyMs": 1.5,
+  "fallbackRate": 0.1
+}

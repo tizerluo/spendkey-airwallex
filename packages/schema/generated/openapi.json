@@ -1,0 +1,1585 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "http://json-schema.org/draft-07/schema#",
+  "info": {
+    "title": "spendkey API",
+    "version": "1.0.0",
+    "description": "v1.0.0 frozen after the Opus K1 blocking fixes; see docs/adr/0001-schema-v1.md."
+  },
+  "externalDocs": {
+    "description": "Public decision chain discovery endpoint",
+    "url": "./decision-chain.openapi.json"
+  },
+  "paths": {
+    "/v1/plan": {
+      "post": {
+        "operationId": "createPlan",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed payment plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentPlan"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guard": {
+      "post": {
+        "operationId": "guardPayment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Guard decision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/quote": {
+      "post": {
+        "operationId": "getQuote",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "$ref": "#/components/schemas/HttpUrl"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Candidate native x402 v1 or v2 quotes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Quote"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/catalog": {
+      "get": {
+        "operationId": "getCatalog",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "celo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalog entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogItem"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/receipts": {
+      "post": {
+        "operationId": "reportReceipt",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Receipt"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded payment receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/stats": {
+      "get": {
+        "operationId": "getStats",
+        "responses": {
+          "200": {
+            "description": "Aggregate metrics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stats"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plans/{id}/approve": {
+      "post": {
+        "operationId": "approvePlan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          }
+        ],
+        "description": "Approve the identified plan; returns the resulting signed plan. Authentication is defined by the API implementation.",
+        "responses": {
+          "200": {
+            "description": "Approved payment plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentPlan"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/audit/{id}": {
+      "get": {
+        "operationId": "getAuditRecord",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Action": {
+        "type": "string",
+        "enum": [
+          "pay",
+          "refuse",
+          "ask"
+        ]
+      },
+      "Address": {
+        "type": "string",
+        "pattern": "^0x[0-9a-fA-F]{40}$"
+      },
+      "Approval": {
+        "type": "object",
+        "properties": {
+          "required": {
+            "type": "boolean"
+          },
+          "approveUrl": {
+            "$ref": "#/components/schemas/HttpsUrl"
+          }
+        },
+        "required": [
+          "required",
+          "approveUrl"
+        ],
+        "additionalProperties": false
+      },
+      "AtomicAmount": {
+        "type": "string",
+        "pattern": "^[0-9]+$"
+      },
+      "Attribution": {
+        "type": "object",
+        "properties": {
+          "erc8021": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^[\\x20-\\x7E]+$(?![\\s\\S])"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "erc8021"
+        ],
+        "additionalProperties": false
+      },
+      "AuditRecord": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "planId": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "budgetKey": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "payer": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "timestamp": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "hash": {
+                "$ref": "#/components/schemas/Hash"
+              },
+              "prevHash": {
+                "$ref": "#/components/schemas/Hash"
+              },
+              "stateHash": {
+                "$ref": "#/components/schemas/Hash"
+              },
+              "kind": {
+                "type": "string",
+                "const": "plan"
+              },
+              "decision": {
+                "$ref": "#/components/schemas/Decision"
+              },
+              "decider": {
+                "$ref": "#/components/schemas/Decider"
+              },
+              "rules": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Identifier"
+                }
+              },
+              "savedAmountAtomic": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            },
+            "required": [
+              "id",
+              "planId",
+              "budgetKey",
+              "seq",
+              "payer",
+              "timestamp",
+              "hash",
+              "prevHash",
+              "kind",
+              "decision",
+              "decider",
+              "rules",
+              "savedAmountAtomic"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "planId": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "budgetKey": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "payer": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "timestamp": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "hash": {
+                "$ref": "#/components/schemas/Hash"
+              },
+              "prevHash": {
+                "$ref": "#/components/schemas/Hash"
+              },
+              "stateHash": {
+                "$ref": "#/components/schemas/Hash"
+              },
+              "kind": {
+                "type": "string",
+                "const": "guard"
+              },
+              "decision": {
+                "$ref": "#/components/schemas/Decision"
+              },
+              "decider": {
+                "$ref": "#/components/schemas/Decider"
+              },
+              "rules": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Identifier"
+                }
+              },
+              "savedAmountAtomic": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            },
+            "required": [
+              "id",
+              "planId",
+              "budgetKey",
+              "seq",
+              "payer",
+              "timestamp",
+              "hash",
+              "prevHash",
+              "kind",
+              "decision",
+              "decider",
+              "rules",
+              "savedAmountAtomic"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "planId": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "budgetKey": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "payer": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "timestamp": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "hash": {
+                "$ref": "#/components/schemas/Hash"
+              },
+              "prevHash": {
+                "$ref": "#/components/schemas/Hash"
+              },
+              "stateHash": {
+                "$ref": "#/components/schemas/Hash"
+              },
+              "kind": {
+                "type": "string",
+                "const": "receipt"
+              },
+              "receipt": {
+                "$ref": "#/components/schemas/Receipt"
+              }
+            },
+            "required": [
+              "id",
+              "planId",
+              "budgetKey",
+              "seq",
+              "payer",
+              "timestamp",
+              "hash",
+              "prevHash",
+              "kind",
+              "receipt"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "planId": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "budgetKey": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "payer": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "timestamp": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "hash": {
+                "$ref": "#/components/schemas/Hash"
+              },
+              "prevHash": {
+                "$ref": "#/components/schemas/Hash"
+              },
+              "stateHash": {
+                "$ref": "#/components/schemas/Hash"
+              },
+              "kind": {
+                "type": "string",
+                "const": "approval"
+              },
+              "decision": {
+                "$ref": "#/components/schemas/Decision"
+              },
+              "decider": {
+                "$ref": "#/components/schemas/Decider"
+              },
+              "rules": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Identifier"
+                }
+              },
+              "savedAmountAtomic": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            },
+            "required": [
+              "id",
+              "planId",
+              "budgetKey",
+              "seq",
+              "payer",
+              "timestamp",
+              "hash",
+              "prevHash",
+              "kind",
+              "decision",
+              "decider",
+              "rules",
+              "savedAmountAtomic"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "CallSpec": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "$ref": "#/components/schemas/HttpsUrl"
+          },
+          "method": {
+            "$ref": "#/components/schemas/HttpMethod"
+          },
+          "body": {},
+          "bodyHash": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source"
+          },
+          "toolId": {
+            "$ref": "#/components/schemas/Identifier"
+          }
+        },
+        "required": [
+          "url",
+          "method",
+          "source",
+          "toolId"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "body"
+              ]
+            },
+            "then": {
+              "required": [
+                "bodyHash"
+              ]
+            }
+          }
+        ]
+      },
+      "CatalogItem": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/Source"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "url": {
+            "$ref": "#/components/schemas/HttpUrl"
+          },
+          "method": {
+            "$ref": "#/components/schemas/HttpMethod"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "description": {
+            "type": "string"
+          },
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "x402Version": {
+            "anyOf": [
+              {
+                "type": "number",
+                "const": 1
+              },
+              {
+                "type": "number",
+                "const": 2
+              }
+            ]
+          },
+          "celoAssets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          },
+          "price": {
+            "$ref": "#/components/schemas/CatalogPrice"
+          },
+          "payRail": {
+            "type": "string",
+            "enum": [
+              "x402",
+              "prepaid",
+              "card"
+            ]
+          },
+          "celo": {
+            "type": "boolean"
+          },
+          "scoreable": {
+            "type": "boolean"
+          },
+          "trust": {
+            "type": "object",
+            "properties": {
+              "erc8004": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "payers30d": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "requiresSelf": {
+            "type": "boolean"
+          },
+          "async": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "source",
+          "id",
+          "url",
+          "method",
+          "x402Version",
+          "celoAssets",
+          "price",
+          "payRail",
+          "celo",
+          "scoreable",
+          "requiresSelf",
+          "async"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "price": {
+                  "properties": {
+                    "network": {
+                      "const": "eip155:42220"
+                    }
+                  },
+                  "required": [
+                    "network"
+                  ]
+                }
+              },
+              "required": [
+                "price"
+              ]
+            },
+            "then": {
+              "properties": {
+                "celo": {
+                  "const": true
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "celo": {
+                  "const": false
+                },
+                "scoreable": {
+                  "const": false
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CatalogPrice": {
+        "type": "object",
+        "properties": {
+          "amountAtomic": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "asset": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "network": {
+            "type": "string",
+            "pattern": "^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$"
+          }
+        },
+        "required": [
+          "amountAtomic",
+          "asset",
+          "network"
+        ],
+        "additionalProperties": false
+      },
+      "Decider": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/DecisionProviderId"
+          },
+          "model": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "systemone",
+              "openai-decisions",
+              "chat-json",
+              "rules"
+            ]
+          },
+          "probs": {
+            "$ref": "#/components/schemas/Probs"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Probability"
+          },
+          "fallback": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "provider",
+          "model",
+          "transport",
+          "probs",
+          "fallback"
+        ],
+        "additionalProperties": false
+      },
+      "Decision": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/Action"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          },
+          "probs": {
+            "$ref": "#/components/schemas/Probs"
+          }
+        },
+        "required": [
+          "action",
+          "reasons",
+          "probs"
+        ],
+        "additionalProperties": false
+      },
+      "DecisionChain": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecisionProviderId"
+            },
+            "minItems": 1,
+            "maxItems": 7
+          },
+          "note": {
+            "type": "string",
+            "const": "Configured order. Providers without credentials on this deployment are skipped; rules always runs last."
+          }
+        },
+        "required": [
+          "chain",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "DecisionProviderId": {
+        "type": "string",
+        "pattern": "^(?:rules|typesafe:[A-Za-z0-9._-]+|openrouter:[a-z0-9-]+\\/[A-Za-z0-9._-]+(?::free)?|fastino:[a-z0-9-]+\\/[A-Za-z0-9._-]+)$"
+      },
+      "GuardQuote": {
+        "type": "object",
+        "properties": {
+          "amountAtomic": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "asset": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "network": {
+            "$ref": "#/components/schemas/Network"
+          },
+          "payTo": {
+            "$ref": "#/components/schemas/Address"
+          }
+        },
+        "required": [
+          "amountAtomic",
+          "asset",
+          "network",
+          "payTo"
+        ],
+        "additionalProperties": false
+      },
+      "GuardReq": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "$ref": "#/components/schemas/HttpsUrl"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/GuardQuote"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "maxSpend": {
+            "$ref": "#/components/schemas/SpendAmount"
+          },
+          "payer": {
+            "$ref": "#/components/schemas/Address"
+          }
+        },
+        "required": [
+          "url",
+          "quote",
+          "intent",
+          "maxSpend",
+          "payer"
+        ],
+        "additionalProperties": false
+      },
+      "GuardResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "action": {
+            "$ref": "#/components/schemas/Action"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          },
+          "maxAmountAtomic": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "decider": {
+            "$ref": "#/components/schemas/Decider"
+          },
+          "auditHash": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "prevHash": {
+            "$ref": "#/components/schemas/Hash"
+          }
+        },
+        "required": [
+          "id",
+          "expiresAt",
+          "action",
+          "reasons",
+          "maxAmountAtomic",
+          "decider",
+          "auditHash",
+          "prevHash"
+        ],
+        "additionalProperties": false
+      },
+      "Hash": {
+        "type": "string",
+        "pattern": "^0x[0-9a-fA-F]{64}$"
+      },
+      "HttpMethod": {
+        "type": "string",
+        "enum": [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE",
+          "HEAD",
+          "OPTIONS"
+        ]
+      },
+      "HttpsUrl": {
+        "type": "string",
+        "format": "uri",
+        "pattern": "^[hH][tT][tT][pP][sS]://"
+      },
+      "HttpUrl": {
+        "type": "string",
+        "format": "uri",
+        "pattern": "^[hH][tT][tT][pP][sS]?://"
+      },
+      "Identifier": {
+        "type": "string",
+        "minLength": 1
+      },
+      "Network": {
+        "type": "string",
+        "const": "eip155:42220"
+      },
+      "PaymentPlan": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "payer": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "nonce": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "action": {
+            "$ref": "#/components/schemas/Action"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          },
+          "decider": {
+            "$ref": "#/components/schemas/Decider"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            },
+            "minItems": 1,
+            "maxItems": 10
+          },
+          "approval": {
+            "$ref": "#/components/schemas/Approval"
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/Attribution"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "auditHash": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "prevHash": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "sig": {
+            "$ref": "#/components/schemas/Signature"
+          }
+        },
+        "required": [
+          "id",
+          "payer",
+          "nonce",
+          "action",
+          "reasons",
+          "decider",
+          "attribution",
+          "expiresAt",
+          "auditHash",
+          "prevHash",
+          "sig"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "pay"
+                }
+              },
+              "required": [
+                "action"
+              ]
+            },
+            "then": {
+              "required": [
+                "steps"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "steps"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "ask"
+                }
+              },
+              "required": [
+                "action"
+              ]
+            },
+            "then": {
+              "required": [
+                "approval"
+              ],
+              "properties": {
+                "approval": {
+                  "properties": {
+                    "required": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "required"
+                  ]
+                }
+              }
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "approval"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "steps": {
+                "items": [
+                  {
+                    "properties": {
+                      "fallbackOf": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "fallbackOf": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 0
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "fallbackOf": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "fallbackOf": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 2
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "fallbackOf": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 3
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "fallbackOf": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 4
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "fallbackOf": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 5
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "fallbackOf": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 6
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "fallbackOf": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 7
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "fallbackOf": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 8
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "PaymentSpec": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "x402Version": {
+                "type": "number",
+                "const": 1
+              },
+              "network": {
+                "type": "string",
+                "const": "celo"
+              },
+              "asset": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "payTo": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "maxAmountAtomic": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "scoreable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "x402Version",
+              "network",
+              "asset",
+              "payTo",
+              "maxAmountAtomic",
+              "scoreable"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "x402Version": {
+                "type": "number",
+                "const": 2
+              },
+              "network": {
+                "type": "string",
+                "const": "eip155:42220"
+              },
+              "asset": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "payTo": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "maxAmountAtomic": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "scoreable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "x402Version",
+              "network",
+              "asset",
+              "payTo",
+              "maxAmountAtomic",
+              "scoreable"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "PlanReq": {
+        "type": "object",
+        "properties": {
+          "intent": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "tool": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "input": {},
+          "maxSpend": {
+            "$ref": "#/components/schemas/SpendAmount"
+          },
+          "payer": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "prefer": {
+            "type": "object",
+            "properties": {
+              "celoOnly": {
+                "type": "boolean"
+              },
+              "providers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Identifier"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "budgetKey": {
+            "$ref": "#/components/schemas/Identifier"
+          }
+        },
+        "required": [
+          "intent",
+          "maxSpend",
+          "payer"
+        ],
+        "additionalProperties": false
+      },
+      "PlanStep": {
+        "type": "object",
+        "properties": {
+          "call": {
+            "$ref": "#/components/schemas/CallSpec"
+          },
+          "pay": {
+            "$ref": "#/components/schemas/PaymentSpec"
+          },
+          "fallbackOf": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9
+          }
+        },
+        "required": [
+          "call",
+          "pay"
+        ],
+        "additionalProperties": false
+      },
+      "Probability": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "Probs": {
+        "type": "object",
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/Probability"
+            },
+            {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/components/schemas/Probability"
+              }
+            }
+          ]
+        }
+      },
+      "ProviderStats": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/DecisionProviderId"
+          },
+          "calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "latencyMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "fallbackRate": {
+            "$ref": "#/components/schemas/Probability"
+          }
+        },
+        "required": [
+          "provider",
+          "calls",
+          "latencyMs",
+          "fallbackRate"
+        ],
+        "additionalProperties": false
+      },
+      "Quote": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "$ref": "#/components/schemas/Source"
+              },
+              "id": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "url": {
+                "$ref": "#/components/schemas/HttpUrl"
+              },
+              "method": {
+                "$ref": "#/components/schemas/HttpMethod"
+              },
+              "asset": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "payTo": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "scheme": {
+                "type": "string",
+                "const": "exact"
+              },
+              "scoreable": {
+                "type": "boolean"
+              },
+              "maxTimeoutSeconds": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "x402Version": {
+                "type": "number",
+                "const": 1
+              },
+              "network": {
+                "type": "string",
+                "const": "celo"
+              },
+              "maxAmountRequired": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            },
+            "required": [
+              "source",
+              "id",
+              "url",
+              "method",
+              "asset",
+              "payTo",
+              "scheme",
+              "scoreable",
+              "x402Version",
+              "network",
+              "maxAmountRequired"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "$ref": "#/components/schemas/Source"
+              },
+              "id": {
+                "$ref": "#/components/schemas/Identifier"
+              },
+              "url": {
+                "$ref": "#/components/schemas/HttpUrl"
+              },
+              "method": {
+                "$ref": "#/components/schemas/HttpMethod"
+              },
+              "asset": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "payTo": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "scheme": {
+                "type": "string",
+                "const": "exact"
+              },
+              "scoreable": {
+                "type": "boolean"
+              },
+              "maxTimeoutSeconds": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "x402Version": {
+                "type": "number",
+                "const": 2
+              },
+              "network": {
+                "type": "string",
+                "const": "eip155:42220"
+              },
+              "amount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            },
+            "required": [
+              "source",
+              "id",
+              "url",
+              "method",
+              "asset",
+              "payTo",
+              "scheme",
+              "scoreable",
+              "x402Version",
+              "network",
+              "amount"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "tx": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "network": {
+            "type": "string",
+            "const": "eip155:42220"
+          }
+        },
+        "required": [
+          "planId",
+          "tx",
+          "network"
+        ],
+        "additionalProperties": false
+      },
+      "Signature": {
+        "type": "string",
+        "pattern": "^0x[0-9a-fA-F]{130}$"
+      },
+      "Source": {
+        "type": "string",
+        "enum": [
+          "buy",
+          "agent402",
+          "bazaar"
+        ]
+      },
+      "SpendAmount": {
+        "type": "string",
+        "pattern": "^[0-9]+(?:\\.[0-9]+)?$"
+      },
+      "Stats": {
+        "type": "object",
+        "properties": {
+          "uniquePayers": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "plans": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "executionRate": {
+            "$ref": "#/components/schemas/Probability"
+          },
+          "refusalRate": {
+            "$ref": "#/components/schemas/Probability"
+          },
+          "savedAmountAtomic": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderStats"
+            }
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "uniquePayers",
+          "plans",
+          "executionRate",
+          "refusalRate",
+          "savedAmountAtomic",
+          "providers",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "Timestamp": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^((\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\\d|3[01])|(0[469]|11)-(0[1-9]|[12]\\d|30)|(02)-(0[1-9]|1\\d|2[0-8])))T([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d(\\.\\d+)?)?(Z|([+-]\\d{2}:?\\d{2}))$"
+      }
+    }
+  }
+}

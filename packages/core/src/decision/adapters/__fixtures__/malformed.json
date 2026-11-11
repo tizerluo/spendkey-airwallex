@@ -1,0 +1,9 @@
+{
+  "synthetic": true,
+  "model": "jev-1.13.0",
+  "answers": {
+    "spend": { "type": "noul", "noul": 1.2 },
+    "risk": { "type": "noul", "noul": 0.1 }
+  },
+  "usage": { "input_tokens": 300, "output_tokens": 20, "cost": 0.00004 }
+}

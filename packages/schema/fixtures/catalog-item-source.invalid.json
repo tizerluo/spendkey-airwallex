@@ -1,0 +1,31 @@
+{
+  "source": "monid",
+  "id": "lookup",
+  "url": "https://mock.example/tools/lookup",
+  "method": "POST",
+  "name": "Mock lookup",
+  "description": "Offline example",
+  "inputSchema": {
+    "type": "object"
+  },
+  "x402Version": 1,
+  "celoAssets": [
+    "USDC",
+    "USDT",
+    "USAT"
+  ],
+  "price": {
+    "amountAtomic": "5000",
+    "asset": "0x1111111111111111111111111111111111111111",
+    "network": "eip155:42220"
+  },
+  "payRail": "x402",
+  "celo": true,
+  "scoreable": true,
+  "trust": {
+    "payers30d": 0
+  },
+  "requiresSelf": false,
+  "async": false,
+  "updatedAt": "2026-10-12T12:00:00Z"
+}

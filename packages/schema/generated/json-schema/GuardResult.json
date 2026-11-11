@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:sr:schema:1.0.0:GuardResult",
+  "title": "GuardResult",
+  "type": "object",
+  "properties": {
+    "id": {
+      "$ref": "#/definitions/Identifier"
+    },
+    "expiresAt": {
+      "$ref": "#/definitions/Timestamp"
+    },
+    "action": {
+      "$ref": "#/definitions/Action"
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Identifier"
+      }
+    },
+    "maxAmountAtomic": {
+      "$ref": "#/definitions/AtomicAmount"
+    },
+    "decider": {
+      "$ref": "#/definitions/Decider"
+    },
+    "auditHash": {
+      "$ref": "#/definitions/Hash"
+    },
+    "prevHash": {
+      "$ref": "#/definitions/Hash"
+    }
+  },
+  "required": [
+    "id",
+    "expiresAt",
+    "action",
+    "reasons",
+    "maxAmountAtomic",
+    "decider",
+    "auditHash",
+    "prevHash"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^((\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\\d|3[01])|(0[469]|11)-(0[1-9]|[12]\\d|30)|(02)-(0[1-9]|1\\d|2[0-8])))T([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d(\\.\\d+)?)?(Z|([+-]\\d{2}:?\\d{2}))$"
+    },
+    "Action": {
+      "type": "string",
+      "enum": [
+        "pay",
+        "refuse",
+        "ask"
+      ]
+    },
+    "AtomicAmount": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "Decider": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "$ref": "#/definitions/DecisionProviderId"
+        },
+        "model": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "systemone",
+            "openai-decisions",
+            "chat-json",
+            "rules"
+          ]
+        },
+        "probs": {
+          "$ref": "#/definitions/Probs"
+        },
+        "confidence": {
+          "$ref": "#/definitions/Probability"
+        },
+        "fallback": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "transport",
+        "probs",
+        "fallback"
+      ],
+      "additionalProperties": false
+    },
+    "Hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$"
+    },
+    "DecisionProviderId": {
+      "type": "string",
+      "pattern": "^(?:rules|typesafe:[A-Za-z0-9._-]+|openrouter:[a-z0-9-]+\\/[A-Za-z0-9._-]+(?::free)?|fastino:[a-z0-9-]+\\/[A-Za-z0-9._-]+)$"
+    },
+    "Probs": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/definitions/Probability"
+          },
+          {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/definitions/Probability"
+            }
+          }
+        ]
+      }
+    },
+    "Probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

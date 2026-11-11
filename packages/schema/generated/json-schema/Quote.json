@@ -1,0 +1,164 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:sr:schema:1.0.0:Quote",
+  "title": "Quote",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/Source"
+        },
+        "id": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "url": {
+          "$ref": "#/definitions/HttpUrl"
+        },
+        "method": {
+          "$ref": "#/definitions/HttpMethod"
+        },
+        "asset": {
+          "$ref": "#/definitions/Address"
+        },
+        "payTo": {
+          "$ref": "#/definitions/Address"
+        },
+        "scheme": {
+          "type": "string",
+          "const": "exact"
+        },
+        "scoreable": {
+          "type": "boolean"
+        },
+        "maxTimeoutSeconds": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "x402Version": {
+          "type": "number",
+          "const": 1
+        },
+        "network": {
+          "type": "string",
+          "const": "celo"
+        },
+        "maxAmountRequired": {
+          "$ref": "#/definitions/AtomicAmount"
+        }
+      },
+      "required": [
+        "source",
+        "id",
+        "url",
+        "method",
+        "asset",
+        "payTo",
+        "scheme",
+        "scoreable",
+        "x402Version",
+        "network",
+        "maxAmountRequired"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/Source"
+        },
+        "id": {
+          "$ref": "#/definitions/Identifier"
+        },
+        "url": {
+          "$ref": "#/definitions/HttpUrl"
+        },
+        "method": {
+          "$ref": "#/definitions/HttpMethod"
+        },
+        "asset": {
+          "$ref": "#/definitions/Address"
+        },
+        "payTo": {
+          "$ref": "#/definitions/Address"
+        },
+        "scheme": {
+          "type": "string",
+          "const": "exact"
+        },
+        "scoreable": {
+          "type": "boolean"
+        },
+        "maxTimeoutSeconds": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "x402Version": {
+          "type": "number",
+          "const": 2
+        },
+        "network": {
+          "type": "string",
+          "const": "eip155:42220"
+        },
+        "amount": {
+          "$ref": "#/definitions/AtomicAmount"
+        }
+      },
+      "required": [
+        "source",
+        "id",
+        "url",
+        "method",
+        "asset",
+        "payTo",
+        "scheme",
+        "scoreable",
+        "x402Version",
+        "network",
+        "amount"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "definitions": {
+    "Source": {
+      "type": "string",
+      "enum": [
+        "buy",
+        "agent402",
+        "bazaar"
+      ]
+    },
+    "Identifier": {
+      "type": "string",
+      "minLength": 1
+    },
+    "HttpUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^[hH][tT][tT][pP][sS]?://"
+    },
+    "HttpMethod": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "HEAD",
+        "OPTIONS"
+      ]
+    },
+    "Address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    },
+    "AtomicAmount": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    }
+  }
+}

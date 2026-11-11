@@ -1,0 +1,6 @@
+{
+  "url": "https://mock.example/tools/lookup",
+  "method": "POST",
+  "source": "buy",
+  "toolId": "lookup"
+}

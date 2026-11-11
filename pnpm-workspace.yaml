@@ -1,0 +1,7 @@
+packages:
+  - 'packages/*'
+
+minimumReleaseAge: 4320
+
+overrides:
+  rollup: 4.64.3

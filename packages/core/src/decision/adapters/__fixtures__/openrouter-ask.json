@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "id": "synthetic-request",
+  "provider": "TypeSafe",
+  "model": "typesafe/jev-1.13.0",
+  "answers": {
+    "spend": { "type": "noul", "noul": 0.55 },
+    "risk": { "type": "noul", "noul": 0.1 }
+  },
+  "usage": { "input_tokens": 275, "output_tokens": 20, "cost": 0.00003 }
+}

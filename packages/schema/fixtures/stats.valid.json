@@ -1,0 +1,16 @@
+{
+  "uniquePayers": 4,
+  "plans": 10,
+  "executionRate": 0.8,
+  "refusalRate": 0.1,
+  "savedAmountAtomic": "10000",
+  "providers": [
+    {
+      "provider": "rules",
+      "calls": 10,
+      "latencyMs": 1.5,
+      "fallbackRate": 0.1
+    }
+  ],
+  "updatedAt": "2026-10-12T12:00:00Z"
+}

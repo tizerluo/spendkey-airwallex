@@ -1,0 +1,4 @@
+{
+  "chain": ["fastino:fastino/GLiDE", "openrouter:perplexity/pplx-decider-v1.2", "openrouter:microsoft/microsoft-decision-1", "openrouter:inception/mercury-decide:free", "rules"],
+  "note": "Configured order. Providers without credentials on this deployment are skipped; rules always runs last."
+}

@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:sr:schema:1.0.0:CallSpec",
+  "title": "CallSpec",
+  "type": "object",
+  "properties": {
+    "url": {
+      "$ref": "#/definitions/HttpsUrl"
+    },
+    "method": {
+      "$ref": "#/definitions/HttpMethod"
+    },
+    "body": {},
+    "bodyHash": {
+      "$ref": "#/definitions/Hash"
+    },
+    "source": {
+      "$ref": "#/definitions/Source"
+    },
+    "toolId": {
+      "$ref": "#/definitions/Identifier"
+    }
+  },
+  "required": [
+    "url",
+    "method",
+    "source",
+    "toolId"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "body"
+        ]
+      },
+      "then": {
+        "required": [
+          "bodyHash"
+        ]
+      }
+    }
+  ],
+  "definitions": {
+    "HttpsUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^[hH][tT][tT][pP][sS]://"
+    },
+    "HttpMethod": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "HEAD",
+        "OPTIONS"
+      ]
+    },
+    "Hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$"
+    },
+    "Source": {
+      "type": "string",
+      "enum": [
+        "buy",
+        "agent402",
+        "bazaar"
+      ]
+    },
+    "Identifier": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

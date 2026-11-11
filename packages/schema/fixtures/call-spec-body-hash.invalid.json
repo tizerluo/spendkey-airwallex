@@ -1,0 +1,10 @@
+{
+  "url": "https://mock.example/tools/lookup",
+  "method": "POST",
+  "body": {
+    "query": "mock"
+  },
+  "source": "buy",
+  "toolId": "lookup",
+  "bodyHash": "0x1234"
+}

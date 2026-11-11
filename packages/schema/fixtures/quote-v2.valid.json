@@ -1,0 +1,14 @@
+{
+  "source": "agent402",
+  "id": "lookup",
+  "url": "https://mock.example/tools/lookup",
+  "method": "POST",
+  "asset": "0x1111111111111111111111111111111111111111",
+  "payTo": "0x2222222222222222222222222222222222222222",
+  "scheme": "exact",
+  "scoreable": true,
+  "maxTimeoutSeconds": 60,
+  "x402Version": 2,
+  "network": "eip155:42220",
+  "amount": "5000"
+}
