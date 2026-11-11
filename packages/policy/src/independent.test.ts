@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { cardRequestIdFromApproval, createCardInputSchema } from '@sk/airwallex';
+import { cardNicknameFromRequestId, cardRequestIdFromApproval, createCardInputSchema } from '@sk/airwallex';
 import { describe, expect, it } from 'vitest';
 import {
   ApprovalError,
@@ -814,7 +814,7 @@ describe('independent: human approval gates', () => {
 describe('independent: approval-to-card controls', () => {
   it('derives a deterministic, bounded request_id from the approval id only', () => {
     const first = approved();
-    const expected = `sk-${createHash('sha256')
+    const expected = `spk_${createHash('sha256')
       .update(first.approvalId)
       .digest('hex')
       .slice(0, 40)}`;
@@ -822,10 +822,10 @@ describe('independent: approval-to-card controls', () => {
 
     expect(body.request_id).toBe(expected);
     expect(body.request_id).toBe(cardRequestIdFromApproval(first.approvalId));
-    expect(body.request_id).toMatch(/^sk-[0-9a-f]{40}$/);
+    expect(body.request_id).toMatch(/^spk_[0-9a-f]{40}$/);
     expect(body.request_id.length).toBeLessThanOrEqual(50);
     expect(approvalToCardInput(first, CARD_OPTIONS).request_id).toBe(body.request_id);
-    expect(cardRequestIdFromApproval('x'.repeat(1000))).toHaveLength(43);
+    expect(cardRequestIdFromApproval('x'.repeat(1000))).toHaveLength(44);
 
     const relabelled: Approval = {
       ...first,
@@ -941,10 +941,14 @@ describe('independent: approval-to-card controls', () => {
   });
 
   it('rejects a zero or unrepresentable limit and accepts one cent', () => {
-    expect(() => approved({ perChargeMinor: 0 })).toThrow();
+    expect(() => approved({ perChargeMinor: 0 })).toThrow(expect.objectContaining({
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'too_small', path: ['amountMinor'] })]),
+    }));
     const zero = approved();
     zero.request.amountMinor = 0;
-    expect(() => approvalToCardInput(zero, CARD_OPTIONS)).toThrow();
+    expect(() => approvalToCardInput(zero, CARD_OPTIONS)).toThrow(expect.objectContaining({
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'too_small', path: ['amountMinor'] })]),
+    }));
 
     const maximum = approved({ perChargeMinor: MAX_SAFE });
     expect(() => approvalToCardInput(maximum, CARD_OPTIONS)).toThrow(
@@ -992,12 +996,12 @@ describe('independent: approval-to-card controls', () => {
     expect({ input, request, approval, options }).toEqual(before);
   });
 
-  it('uses the product as the default nick name and accepts an override', () => {
+  it('uses a recoverable request id nickname even with a display-name override', () => {
     const approval = approved();
-    expect(approvalToCardInput(approval, CARD_OPTIONS).nick_name).toBe('independent-purchase');
+    expect(approvalToCardInput(approval, CARD_OPTIONS).nick_name).toBe(cardNicknameFromRequestId(cardRequestIdFromApproval(approval.approvalId)));
     const withoutNickName: CardInputOptions = { ...CARD_OPTIONS };
     delete withoutNickName.nickName;
-    expect(approvalToCardInput(approval, withoutNickName).nick_name).toBe('Test Product');
+    expect(approvalToCardInput(approval, withoutNickName).nick_name).toBe(cardNicknameFromRequestId(cardRequestIdFromApproval(approval.approvalId)));
   });
 });
 

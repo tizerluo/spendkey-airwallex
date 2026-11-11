@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import {
   AirwallexApiError, AirwallexClient, AirwallexResponseError, AirwallexSafetyError,
@@ -48,7 +49,7 @@ function harness(overrides: Record<string, Handler> = {}, baseUrl?: string) {
   const config = loadAirwallexConfig({
     AIRWALLEX_CLIENT_ID: 'test-client-id', AIRWALLEX_API_KEY: 'test-api-key',
     ...(baseUrl === undefined ? {} : { AIRWALLEX_BASE_URL: baseUrl }),
-  }, { allowNonSandbox: true });
+  });
   const client = new AirwallexClient(config, { fetch, now: () => now });
   return { client, calls, counts, setNow: (value: number) => { now = value; } };
 }
@@ -152,9 +153,22 @@ describe('issuing methods', () => {
     const approvalId = 'approval_test_01'.repeat(20);
     const requestId = cardRequestIdFromApproval(approvalId);
     expect(cardRequestIdFromApproval(approvalId)).toBe(requestId);
-    expect(requestId).toMatch(/^sk-[a-f0-9]{40}$/);
+    expect(requestId).toMatch(/^spk_[a-f0-9]{40}$/);
     expect(requestId.length).toBeLessThanOrEqual(50);
     expect(cardRequestIdFromApproval('approval_test_02')).not.toBe(requestId);
+  });
+
+  it('does not match the repository secret scanner pattern', () => {
+    // Let bash evaluate the exact pattern assignment (including POSIX quoting).
+    const script = readFileSync(new URL('../../../scripts/check-secrets.sh', import.meta.url), 'utf8');
+    const assignment = script.split('\n').find(line => line.startsWith('pattern='));
+    expect(assignment).toBeDefined();
+    const scanned = spawnSync('bash', ['-c', `${assignment}\ngrep -qE -- "$pattern"`], {
+      input: JSON.stringify({ request_id: cardRequestIdFromApproval('approval_test_01') }),
+      encoding: 'utf8',
+    });
+    expect(scanned.error).toBeUndefined();
+    expect(scanned.status).toBe(1);
   });
 
   it.each(['50.00', 50, '12.34', 12.34, '0.01', 0.01, 0.29, 1.1, 1e21])('sends numeric amounts for create, update and simulation: %s', async amount => {
@@ -223,7 +237,7 @@ describe('issuing methods', () => {
   it('creates the complete card body and preserves a caller-supplied request ID', async () => {
     const h = harness();
     const card = await h.client.createCard(cardInput);
-    expect(card.card_number).toBe('************0000');
+    expect(card.card?.card_number).toBe('************0000');
     expect(h.calls.at(-1)?.path).toBe('/api/v1/issuing/cards/create');
     expect(h.calls.at(-1)?.method).toBe('POST');
     expect(body(h.calls.at(-1))).toEqual({
@@ -283,10 +297,8 @@ describe('issuing methods', () => {
     expect(body(h.calls.at(-1))).toEqual({ ...simulationInput, transaction_amount: 20 });
   });
 
-  it('blocks simulation outside sandbox even with an explicit config override', () => {
-    const h = harness({}, 'https://example.com');
-    expect(() => h.client.simulateAuthorization(simulationInput)).toThrow(AirwallexSafetyError);
-    expect(h.calls).toHaveLength(0);
+  it('rejects a non-sandbox origin at configuration', () => {
+    expect(() => harness({}, 'https://example.com')).toThrow('AIRWALLEX_BASE_URL must use the sandbox host');
   });
 
   it.each(['card_test_01/details', 'card_test_01/%64etails', 'details', '../details', 'card_test_01\\details'])('blocks card details paths before login: %s', id => {

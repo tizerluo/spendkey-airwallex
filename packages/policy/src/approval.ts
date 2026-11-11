@@ -89,6 +89,7 @@ export interface ApproveOptions {
 }
 
 export function approve(request: ApprovalRequest, options: ApproveOptions): Approval {
+  if (request.rail !== 'card') throw new ApprovalError('rail_not_card');
   if (options.approver.kind !== 'human') throw new ApprovalError('self_approval_forbidden');
   z.string().min(1).parse(options.approver.id);
   approvalRequestSchema.parse(request);

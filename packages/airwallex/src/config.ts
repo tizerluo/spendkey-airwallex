@@ -15,7 +15,6 @@ export function isSandboxUrl(baseUrl: string): boolean {
 
 export function loadAirwallexConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
-  options: { allowNonSandbox?: boolean } = {},
 ): AirwallexConfig {
   const clientId = env['AIRWALLEX_CLIENT_ID'];
   const apiKey = env['AIRWALLEX_API_KEY'];
@@ -28,7 +27,7 @@ export function loadAirwallexConfig(
     throw new AirwallexConfigError('AIRWALLEX_BASE_URL', 'Invalid AIRWALLEX_BASE_URL');
   }
   const baseUrl = url.origin;
-  if (!isSandboxUrl(baseUrl) && options.allowNonSandbox !== true) {
+  if (!isSandboxUrl(baseUrl)) {
     throw new AirwallexConfigError('AIRWALLEX_BASE_URL', 'AIRWALLEX_BASE_URL must use the sandbox host');
   }
   const config = Object.freeze({ clientId, baseUrl });

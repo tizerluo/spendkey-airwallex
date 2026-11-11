@@ -71,6 +71,13 @@ describe('termsHash', () => {
 });
 
 describe('human approval', () => {
+  it.each(['x402', undefined, 'future-rail'])('rejects non-card rail %s before validating approval terms', rail => {
+    const valid = request();
+    const opts = options(valid);
+    const input = { ...valid, rail } as ApprovalRequest;
+    expectCode(() => approve(input, opts), 'rail_not_card');
+  });
+
   it('records a human, timestamp, independent request copy and unique approval ID', () => {
     const input = request();
     const opts = options(input);

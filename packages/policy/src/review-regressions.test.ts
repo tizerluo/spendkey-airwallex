@@ -14,6 +14,12 @@ const usageOffer = {
 } satisfies Parameters<typeof toCandidate>[0];
 
 describe('M2 compare and policy contract', () => {
+  it('rejects an x402 snapshot relabelled as a card candidate', () => {
+    const disguised = candidate({ sourceId: 'x402-snapshot', rail: 'card' });
+    expect(() => candidateSchema.parse(disguised)).toThrow('rail_not_card');
+    expect(candidateSchema.parse({ ...disguised, rail: 'x402' }).rail).toBe('x402');
+  });
+
   it('keeps the public Candidate types identical', () => {
     expectTypeOf<CompareCandidate>().toEqualTypeOf<PolicyCandidate>();
   });

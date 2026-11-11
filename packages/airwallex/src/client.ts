@@ -1,16 +1,18 @@
 import { createHash } from 'node:crypto';
 import type { z } from 'zod';
-import { configApiKey, isSandboxUrl } from './config.js';
+import { configApiKey } from './config.js';
 import type { AirwallexConfig } from './config.js';
 import { AirwallexApiError, AirwallexResponseError, AirwallexSafetyError } from './errors.js';
+import { nonJsonDiagnostic, redactBody } from './redact.js';
 import {
   authorizationControlsInputSchema, balancesSchema, cardholderInputSchema, cardholderSchema,
   cardLimitsSchema, cardSchema, cardStatusSchema, createCardInputSchema, issuingConfigSchema,
   loginSchema, simulationInputSchema, simulationSchema, transactionsSchema,
+  cardsPageSchema, CARD_NICKNAME_MAX_LENGTH, cardNicknameFromRequestId, parseCardLenient,
 } from './schemas.js';
 import type {
   AuthorizationControls, CardStatus, CreateCardholderInput, CreateCardInput,
-  ListTransactionsInput, SimulateAuthorizationInput,
+  Card, CardsResponse, CreateCardResult, ListCardsInput, ListTransactionsInput, SimulateAuthorizationInput,
 } from './schemas.js';
 
 export interface AirwallexClientOptions {
@@ -21,7 +23,7 @@ export interface AirwallexClientOptions {
 
 /** Stable card idempotency key: reuse this approval's ID across createCard calls. */
 export function cardRequestIdFromApproval(approvalId: string): string {
-  return `sk-${createHash('sha256').update(approvalId).digest('hex').slice(0, 40)}`;
+  return `spk_${createHash('sha256').update(approvalId).digest('hex').slice(0, 40)}`;
 }
 
 function controlsForRequest(input: AuthorizationControls) {
@@ -55,6 +57,14 @@ export function assertSafeCardPath(path: string): void {
   if (/\/issuing\/cards(?:\/|$)/.test(decoded) && decoded.includes('/details')) {
     throw new AirwallexSafetyError('Card details access is forbidden');
   }
+}
+
+/** 用原始条目的 card_id 判断下一页是不是上一页的重复。 */
+function firstCardId(items: unknown[]): string | undefined {
+  const first = items[0];
+  if (first === undefined || first === null || typeof first !== 'object' || Array.isArray(first)) return undefined;
+  const id = (first as Record<string, unknown>)['card_id'];
+  return typeof id === 'string' && id.length > 0 ? id : undefined;
 }
 
 export class AirwallexClient {
@@ -92,7 +102,7 @@ export class AirwallexClient {
     }
   }
 
-  async #read<T>(response: Response, schema: z.ZodType<T>): Promise<T> {
+  async #read<T>(response: Response, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<T> {
     let body: unknown;
     try { body = await response.json(); }
     catch {
@@ -109,6 +119,16 @@ export class AirwallexClient {
     }
     const parsed = schema.safeParse(body);
     if (!parsed.success) throw new AirwallexResponseError();
+    // Schemas redact unknown data; additionally scrub credential echoes in diagnostics.
+    const scrubDiagnostics = (value: unknown): void => {
+      if (value === null || typeof value !== 'object') return;
+      for (const [key, item] of Object.entries(value)) {
+        if (key === 'extra' || key === 'unparsed') {
+          (value as Record<string, unknown>)[key] = redactBody(item, text => this.#redact(text));
+        } else scrubDiagnostics(item);
+      }
+    };
+    scrubDiagnostics(parsed.data);
     return parsed.data;
   }
 
@@ -131,7 +151,7 @@ export class AirwallexClient {
     return this.#loginPromise;
   }
 
-  async #request<T>(method: 'GET' | 'POST', path: string, schema: z.ZodType<T>, body?: unknown): Promise<T> {
+  async #requestResponse(method: 'GET' | 'POST', path: string, body?: unknown): Promise<Response> {
     assertSafeCardPath(path);
     let token = await this.#token();
     const send = () => this.#send(path, {
@@ -149,7 +169,11 @@ export class AirwallexClient {
       token = await this.#token();
       response = await send();
     }
-    return this.#read(response, schema);
+    return response;
+  }
+
+  async #request<T>(method: 'GET' | 'POST', path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, body?: unknown): Promise<T> {
+    return this.#read(await this.#requestResponse(method, path, body), schema);
   }
 
   #cardPath(id: string, suffix = ''): string {
@@ -175,10 +199,86 @@ export class AirwallexClient {
   /** Callers must pass a stable request_id (see cardRequestIdFromApproval) for retries across calls. */
   createCard(input: CreateCardInput) {
     const body = createCardInputSchema.parse(input);
-    return this.#request('POST', '/api/v1/issuing/cards/create', cardSchema, {
+    return this.#createCard({
       ...body,
       authorization_controls: controlsForRequest(body.authorization_controls),
     });
+  }
+
+  async #createCard(body: unknown): Promise<CreateCardResult> {
+    const response = await this.#requestResponse('POST', '/api/v1/issuing/cards/create', body);
+    if (!response.ok) {
+      await this.#read(response, cardSchema);
+      throw new AirwallexResponseError();
+    }
+    let received: unknown;
+    try {
+      const text = await response.text();
+      try { received = JSON.parse(text) as unknown; }
+      catch {
+        // 非 JSON 的 2xx 不能原样留下 key=value 凭证，只保留长度和脱敏后的前 200 字。
+        received = nonJsonDiagnostic(this.#redact(text), text.length);
+      }
+    } catch { received = { bodyReadFailed: true }; }
+    const raw = redactBody(received, text => this.#redact(text));
+    const strict = cardSchema.safeParse(received);
+    if (strict.success) return { ok: true, unconfirmed: false, card: strict.data, raw };
+    const card = parseCardLenient(received);
+    return { ok: true, unconfirmed: true, ...(card === undefined ? {} : { card }), raw };
+  }
+
+  /** Collect every page; malformed individual cards remain available as redacted diagnostics. */
+  listCards(input: ListCardsInput = {}): Promise<CardsResponse> {
+    return this.#collectCards(input, 'throw');
+  }
+
+  async #collectCards(input: ListCardsInput, onCap: 'throw' | 'truncate'): Promise<CardsResponse & { truncated?: true }> {
+    const pageSize = input.pageSize ?? 100;
+    if (!Number.isInteger(pageSize) || pageSize < 10 || pageSize > 200) throw new AirwallexSafetyError('Invalid card page size');
+    const query = new URLSearchParams({ page_size: String(pageSize) });
+    const names = { cardholderId: 'cardholder_id', createdAfter: 'from_created_at', createdBefore: 'to_created_at',
+      updatedAfter: 'from_updated_at', updatedBefore: 'to_updated_at', status: 'card_status', nickName: 'nick_name' } as const;
+    for (const key of Object.keys(names) as (keyof typeof names)[]) {
+      if (input[key] !== undefined) query.set(names[key], input[key]);
+    }
+    const result: CardsResponse = { items: [], unparsed: [] };
+    // 硬上限：服务端一直声称还有下一页时必须停，不能无限翻页。
+    const maxPages = 200;
+    let previousFirstId: string | undefined;
+    for (let page = 0; page < maxPages; page++) {
+      query.set('page_num', String(page));
+      const response = await this.#request('GET', `/api/v1/issuing/cards?${query.toString()}`, cardsPageSchema);
+      const firstId = firstCardId(response.items);
+      // 忽略 page_num 时会重复上一页的第一张卡，立刻停，避免打满 200 次请求。
+      if (previousFirstId !== undefined && firstId === previousFirstId) return result;
+      previousFirstId = firstId;
+      for (const item of response.items) {
+        const card = parseCardLenient(item);
+        if (card) result.items.push(card);
+        else result.unparsed.push(redactBody(item, text => this.#redact(text)));
+      }
+      const fullPage = response.items.length >= pageSize;
+      const more = response.has_more === true || (response.has_more === undefined && fullPage);
+      if (!more || response.items.length === 0) return result;
+    }
+    if (onCap === 'truncate') return { ...result, truncated: true };
+    throw new AirwallexSafetyError('Card list page cap exceeded');
+  }
+
+  async findCardByRequestId(requestId: string, input: Pick<ListCardsInput, 'cardholderId' | 'createdAfter'> = {}): Promise<(Card & { listTruncated?: true }) | undefined> {
+    // 列表接口要同时有创建时间上下界才不用默认窗口。只有 createdAfter 时才补上当前时刻。
+    const cards = await this.#collectCards({ ...input,
+      ...(input.createdAfter === undefined ? {} : { createdBefore: new Date(this.#now()).toISOString() }),
+    }, 'truncate');
+    // 多条明确的 request_id 只返回第一条。
+    const explicit = cards.items.find(card => card.request_id === requestId);
+    // 昵称会被截到 50 字符。截断后不同 requestId 会撞车，这时只认明确的 request_id。
+    const matched = explicit ?? (`spk ${requestId}`.length > CARD_NICKNAME_MAX_LENGTH ? undefined
+      : cards.items.find(card => card.request_id === undefined && card.nick_name === cardNicknameFromRequestId(requestId)));
+    if (matched === undefined) return undefined;
+    // 页数打满时仍交回已经看到的匹配，并标上截断，避免直接抛错把恢复结果丢掉。
+    if (cards.truncated === true) return { ...matched, listTruncated: true };
+    return matched;
   }
   getCard(id: string) { return this.#request('GET', this.#cardPath(id), cardSchema); }
   getCardLimits(id: string) { return this.#request('GET', this.#cardPath(id, '/limits'), cardLimitsSchema); }
@@ -214,7 +314,6 @@ export class AirwallexClient {
     return this.#request('GET', `/api/v1/issuing/transactions${suffix}`, transactionsSchema);
   }
   simulateAuthorization(input: SimulateAuthorizationInput) {
-    if (!isSandboxUrl(this.#config.baseUrl)) throw new AirwallexSafetyError('Simulation requires the sandbox host');
     const body = simulationInputSchema.parse(input);
     return this.#request('POST', '/api/v1/simulation/issuing/create', simulationSchema, {
       ...body, transaction_amount: Number(body.transaction_amount),

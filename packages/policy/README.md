@@ -109,7 +109,6 @@ if (decision.action === 'ask' && decision.chosen) {
   });
   const cardInput = approvalToCardInput(approval, {
     cardholderId: 'cardholder_test_01', createdBy: 'human_test_01',
-    nickName: 'test-purchase',
   });
   // The application can pass cardInput to its injected Airwallex client.
 }
@@ -133,7 +132,7 @@ status are outside this specified hash contract.
 `approve` requires a human, matching presented hash and an unexpired request
 (expiration is exclusive). `ApprovalError.code` is `self_approval_forbidden`,
 `terms_mismatch`, `approval_expired`, `mcc_required`, or `rail_not_card`. Both
-`createApprovalRequest` and `approvalToCardInput` reject non-card rails, even
+`createApprovalRequest`, `approve`, and `approvalToCardInput` reject non-card rails, even
 when an MCC is present. Approval requests require the rail and bind it in the
 terms hash. A human must explicitly
 supply a four-digit MCC if absent; approval records the hash of those completed
@@ -150,7 +149,10 @@ sets `request_id = cardRequestIdFromApproval(approval.approvalId)`; persist and
 reuse the approval ID when retrying issuance. There is no random request-ID
 fallback. Limits are JSON numbers compatible with Airwallex's schema; zero
 limits and amounts that lose cents when serialized as numbers are rejected.
-No broad or empty MCC controls are produced. `nickName` defaults to product.
+No broad or empty MCC controls are produced. Card nicknames use
+`cardNicknameFromRequestId(request_id)` for recovery (`spk ${request_id}`, locally
+bounded to 50 characters); the deprecated `nickName` option is ignored. Candidate
+schemas in policy and compare reject `x402-snapshot` sources labelled as `card`.
 
 ## Development
 

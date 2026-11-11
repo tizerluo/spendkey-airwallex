@@ -6,3 +6,5 @@ coverage/
 !.env.example
 .loopx/
 *.log
+demo-output/
+console-data/
