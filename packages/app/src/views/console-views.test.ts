@@ -98,6 +98,7 @@ function sampleAudit(): AuditPageModel {
       },
     ],
     cards: [{ cardId: 'card_test_01', status: 'ACTIVE', limit: '50.00', currency: 'USD' }],
+    runMode: 'sandbox',
   };
 }
 
@@ -413,6 +414,45 @@ describe('renderAuditPage', () => {
     expectNoActiveContent(html);
   });
 
+  it('离线模式把授权标成 emulated，页面里没有 sandbox', () => {
+    const model = sampleAudit();
+    model.runMode = 'offline_emulator';
+    model.events.push({
+      seq: 4,
+      at: '2030-01-01T00:03:00.000Z',
+      kind: 'controls_readback',
+      summary: 'controls read back: MISMATCH',
+      hashShort: 'dddd4444',
+      warning: true,
+    });
+    model.events.push({
+      seq: 5,
+      at: '2030-01-01T00:04:00.000Z',
+      kind: 'card_frozen',
+      summary: 'Frozen by system (auto): scheduled stop',
+      hashShort: 'eeee5555',
+    });
+    const html = renderAuditPage(model);
+    expect(html).toContain('<p id="run-mode">Offline emulator (no Airwallex calls)</p>');
+    expect(html.match(/<td>emulated \(offline\)<\/td>/g)).toHaveLength(2);
+    expect(html).toContain('class="mismatch"');
+    expect(html).toContain('<strong class="warning">controls read back: MISMATCH</strong>');
+    expect(html).toContain('Frozen by system (auto): scheduled stop');
+    expect(html.toLowerCase()).not.toContain('sandbox');
+    expectNoActiveContent(html);
+  });
+
+  it('没有 runMode 时授权列写 mode unknown', () => {
+    const model = sampleAudit();
+    delete model.runMode;
+    const html = renderAuditPage(model);
+    expect(html).toContain('<p id="run-mode">mode unknown</p>');
+    expect(html).toContain('<td>mode unknown</td>');
+    expect(html).not.toContain('sandbox simulation');
+    expect(html).not.toContain('sandbox event (observed)');
+    expect(html.toLowerCase()).not.toContain('sandbox');
+  });
+
   it('没有事件和卡片时给出空状态', () => {
     const model = sampleAudit();
     model.events = [];
@@ -487,7 +527,31 @@ describe('renderIndexPage', () => {
     const html = renderIndexPage({ approvals: [] });
     expect(html).toContain('No approval requests.');
     expect(html).toContain('<h1>Approvals</h1>');
+    expect(html).toContain('<p id="run-mode">mode unknown</p>');
+    expect(html.toLowerCase()).not.toContain('sandbox');
     expect(html).not.toContain('<table');
+  });
+
+  it('列表页和审批页按传入的模式标注，离线时不写 sandbox', () => {
+    const indexHtml = renderIndexPage({
+      runMode: 'offline_emulator',
+      approvals: [{ id: 'approval_request_test_01', status: 'requested', vendor: 'Example Vendor', amount: '50.00', currency: 'USD' }],
+    });
+    expect(indexHtml).toContain('<p id="run-mode">Offline emulator (no Airwallex calls)</p>');
+    expect(indexHtml.toLowerCase()).not.toContain('sandbox');
+
+    const consoleHtml = renderIndexPage({
+      runMode: 'console_sandbox',
+      approvals: [],
+    });
+    expect(consoleHtml).toContain('<p id="run-mode">Airwallex sandbox</p>');
+
+    const approval = sampleApproval();
+    approval.runMode = 'offline_emulator';
+    const approvalHtml = renderApprovalPage(approval, { csrfToken: CSRF });
+    expect(approvalHtml).toContain('<p id="run-mode">Offline emulator (no Airwallex calls)</p>');
+    expect(approvalHtml.toLowerCase()).not.toContain('sandbox');
+    expectNoActiveContent(approvalHtml);
   });
 });
 

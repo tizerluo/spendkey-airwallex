@@ -26,6 +26,13 @@ export type AllowedTransactionCount = 'SINGLE' | 'MULTIPLE';
 export type PaymentRail = 'card' | 'x402';
 
 /**
+ * 最近一条 run_started.mode。
+ * offline_emulator 的页面不能出现 sandbox 字样。
+ * 账本里还没有该事件时，模型省略这个字段，页面写 mode unknown。
+ */
+export type ConsoleRunMode = 'offline_emulator' | 'sandbox' | 'console_sandbox';
+
+/**
  * 当前准备让人批准的那一条条款。
  * amount 已是展示用字符串，由 buildApprovalPageModel 用金额工具格式化。
  */
@@ -88,6 +95,8 @@ export interface ApprovalPageModel {
   needsMcc: boolean;
   nonceHint: string;
   demoMode: boolean;
+  /** 最近一条 run_started 的模式。没有该事件时省略。 */
+  runMode?: ConsoleRunMode;
   card?: ApprovalCardSummary;
 }
 
@@ -104,6 +113,8 @@ export interface AuditEventRow {
   summary: string;
   source?: 'simulated' | 'observed';
   hashShort: string;
+  /** 为真时整句摘要用警告样式。控制项回读不一致时使用。 */
+  warning?: boolean;
 }
 
 /** 审计页上的卡片摘要。limit 已是展示用字符串。 */
@@ -120,6 +131,10 @@ export interface AuditPageModel {
   verifyError?: string;
   events: AuditEventRow[];
   cards: AuditCardSummary[];
+  /** 最近一条 run_started 的模式。没有该事件时省略，页面写 mode unknown。 */
+  runMode?: ConsoleRunMode;
+  /** 同一条 run_started 的政策说明。空则省略，页面不编造。 */
+  policyNotes?: readonly string[];
 }
 
 /** 首页列表中的一条审批。 */
@@ -134,4 +149,6 @@ export interface IndexApprovalRow {
 /** 首页模型。 */
 export interface IndexPageModel {
   approvals: IndexApprovalRow[];
+  /** 调用方把账本传入构建器时，取最近一条 run_started。 */
+  runMode?: ConsoleRunMode;
 }

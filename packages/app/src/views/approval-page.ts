@@ -1,6 +1,6 @@
 // 审批页：展示将被绑定的条款，并提供不依赖脚本的批准 / 拒绝表单。
 
-import { consoleBody, escapeHtml, renderDocument, segmentPath } from './html.js';
+import { consoleBody, escapeHtml, renderDocument, runModeBlock, segmentPath } from './html.js';
 import type {
   ApprovalChosenTerms,
   ApprovalComparisonRow,
@@ -15,8 +15,8 @@ const PRICE_UNVERIFIED_CHIP = 'Price not verified \u2014 no savings claim';
 /** 渲染审批页。nonce 输入框不带 value，页面上只出现 nonceHint。没有内联脚本。 */
 export function renderApprovalPage(model: ApprovalPageModel, options: ApprovalRenderOptions): string {
   const title = `Spendkey \u00b7 ${model.intent}`;
-  const main = `${banner(model)}${heading(model)}${chosenSection(model)}${reasonSection(model)}${comparisonSection(model)}${excludedSection(model)}${cardSection(model)}${decisionSection(model, options)}${operatorSection(model, options)}`;
-  return renderDocument(title, consoleBody(main, 'approvals'));
+  const main = `${banner(model)}${runModeBlock(model.runMode)}${heading(model)}${chosenSection(model)}${reasonSection(model)}${comparisonSection(model)}${excludedSection(model)}${cardSection(model)}${decisionSection(model, options)}${operatorSection(model, options)}`;
+  return renderDocument(title, consoleBody(main, 'approvals', model.runMode));
 }
 
 /** Every operator form asks for the terminal token; it is never passed into the renderer. */
