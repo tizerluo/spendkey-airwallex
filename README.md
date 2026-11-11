@@ -19,16 +19,18 @@ Out of scope: real charges, storing card numbers, auto-filling checkouts, loggin
 
 ## Status
 
-Milestone M1 (foundation) — offline only, no live Airwallex calls yet.
+Milestones M1 (foundation) and M2 (decision) are done. Everything runs offline; no live Airwallex calls yet.
 
 | Package | What it is |
 |---|---|
 | `packages/schema` | Shared zod schemas (decision, audit record, approval) from the Spendkey baseline. |
 | `packages/core` | Spendkey decision layer: hard rules, budget windows, decision-provider chain with rules-only fallback, hash-chained audit log. |
 | `packages/airwallex` | Typed Airwallex sandbox client: auth with token refresh, balances, cardholders, virtual cards with authorization controls, freeze, limits, transactions, sandbox authorization simulation, webhook signature verification. Card PAN/CVV endpoints are blocked by design. |
-| `packages/offers` | Offer sources for a purchase intent: a curated list and a read-only x402 snapshot. Fixture prices are synthetic unless marked verified. |
+| `packages/offers` | Offer sources for a purchase intent: a curated list and a read-only x402 snapshot. Fixture prices are synthetic unless marked verified. Each offer has a payment rail (`card` or `x402`). |
+| `packages/compare` | Turns offers into comparable candidates: upfront cash, largest single charge, cost over a horizon (a range when usage is uncertain). Integer money math; no unit conversion. |
+| `packages/policy` | Four hard rules (cash reserve floor, window budget, commitment cap, region), a decision step where the agent can at most ask, human approval bound by a terms hash, and the mapping from an approval to Airwallex card controls (same currency, merchant category, limit, deterministic `request_id`). x402 offers are shown for comparison but never get a card. |
 
-Next: decision on offers (M2), card-control loop and approval/audit pages (M3), end-to-end sandbox demo (M4).
+Next: card audit ledger, transaction/webhook loop, freeze and approval/audit pages (M3); end-to-end sandbox demo (M4).
 
 ## Development
 
