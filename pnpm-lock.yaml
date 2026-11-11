@@ -72,6 +72,9 @@ importers:
       '@sk/compare':
         specifier: workspace:*
         version: link:../compare
+      '@sk/offers':
+        specifier: workspace:*
+        version: link:../offers
 
   packages/schema:
     dependencies:

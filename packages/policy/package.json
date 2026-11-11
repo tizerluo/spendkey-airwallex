@@ -11,5 +11,5 @@
     "lint": "eslint ."
   },
   "dependencies": { "zod": "3.25.76", "@sk/airwallex": "workspace:*", "@sr/core": "workspace:*" },
-  "devDependencies": { "@sk/compare": "workspace:*" }
+  "devDependencies": { "@sk/compare": "workspace:*", "@sk/offers": "workspace:*" }
 }
