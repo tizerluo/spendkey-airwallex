@@ -19,7 +19,7 @@ Out of scope: real charges, storing card numbers, auto-filling checkouts, loggin
 
 ## Status
 
-Milestones M1 (foundation) and M2 (decision) are done. Everything runs offline; no live Airwallex calls yet.
+Milestones M1 (foundation) and M2 (decision) are done. M3 has started with the console views. Everything runs offline; no live Airwallex calls yet.
 
 | Package | What it is |
 |---|---|
@@ -29,8 +29,9 @@ Milestones M1 (foundation) and M2 (decision) are done. Everything runs offline; 
 | `packages/offers` | Offer sources for a purchase intent: a curated list and a read-only x402 snapshot. Fixture prices are synthetic unless marked verified. Each offer has a payment rail (`card` or `x402`). |
 | `packages/compare` | Turns offers into comparable candidates: upfront cash, largest single charge, cost over a horizon (a range when usage is uncertain). Integer money math; no unit conversion. |
 | `packages/policy` | Four hard rules (cash reserve floor, window budget, commitment cap, region), a decision step where the agent can at most ask, human approval bound by a terms hash, and the mapping from an approval to Airwallex card controls (same currency, merchant category, limit, deterministic `request_id`). x402 offers are shown for comparison but never get a card. |
+| `packages/app` | Server-rendered console views (`@sk/app`): approval page, audit page, and the approval index. HTML strings only; the HTTP server is not in this package yet. |
 
-Next: card audit ledger, transaction/webhook loop, freeze and approval/audit pages (M3); end-to-end sandbox demo (M4).
+M3 console views are in. Still ahead: the card audit ledger, transaction/webhook loop, the HTTP server that serves these views, and the end-to-end sandbox demo (M4).
 
 ## Development
 

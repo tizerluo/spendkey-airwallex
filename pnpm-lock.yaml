@@ -36,6 +36,15 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
 
+  packages/app:
+    dependencies:
+      '@sk/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@sk/policy':
+        specifier: workspace:*
+        version: link:../policy
+
   packages/compare:
     dependencies:
       '@sk/offers':
