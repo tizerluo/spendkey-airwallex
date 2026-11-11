@@ -8,13 +8,13 @@ Built for the Airwallex Agentic Banking Hackathon. Nothing in this repository ha
 
 ## What it does
 
-The verified path is the offline DesignCo demo:
+The verified path is the offline DesignCo demo. Card issuance, declines and freeze below are produced by the local Airwallex emulator, not by Airwallex:
 
 1. Compare DesignCo offers. The annual plan is refused (`reserve_breach`). The monthly plan is `ask`. x402 prices are comparison only and are not card-payable.
 2. A person approves the exact terms by posting a one-time nonce.
-3. A virtual card is issued with those controls (monthly limit, USD, merchant category).
-4. One in-policy charge is approved. Two charges are declined: over the limit, and a disallowed merchant category.
-5. The card is frozen. A further charge comes back `CARD_INACTIVE`.
+3. (Emulated) A virtual card is issued with those controls (monthly limit, USD, merchant category).
+4. (Emulated) The emulator approves one in-policy charge and declines two: over the limit, and a disallowed merchant category.
+5. (Emulated) The demo operator freezes the card. A further charge comes back `CARD_INACTIVE`.
 6. Reconciliation records the settled amount and the failed charges.
 7. The hash chain verifies. A tampered copy does not.
 
@@ -26,17 +26,14 @@ Node 22.x and pnpm 10.
 
 ```bash
 pnpm install --frozen-lockfile && pnpm demo:offline
-pnpm audit:verify
-pnpm console
+pnpm audit:verify demo-output/ledger.jsonl --expect-head <head hash printed by the demo>
 ```
 
-Open the console at <http://127.0.0.1:8787>. Do not use `localhost`; the host check rejects it.
-
-`pnpm demo:offline` needs no credentials. It writes `demo-output/ledger.jsonl`. `pnpm audit:verify` checks that file. `pnpm console` serves the approval and audit pages. State stays in the gitignored `console-data/` directory. The operator terminal prints the approval nonce and the operator token once.
+`pnpm demo:offline` needs no credentials. It writes `demo-output/ledger.jsonl`. `pnpm audit:verify` checks that file; with `--expect-head` it also detects a truncated tail.
 
 ## Trust boundaries
 
-The agent can ask or refuse. It cannot approve, issue, or freeze. The approval service is the only component that talks to Airwallex. In the offline emulator that call is a local fake and no network request is made.
+The agent can ask or refuse. It cannot approve, issue, or freeze; this is enforced in process by package boundaries, types and lint import bans, not by a separate process. The approval service is the only component that talks to Airwallex. In the offline emulator that call is a local fake and no network request is made.
 
 `AIRWALLEX_CLIENT_ID` and `AIRWALLEX_API_KEY` are read from the process environment at runtime by the Airwallex client inside the approval service. The agent package does not receive them. They are not written to the ledger, the approval store, logs, or the page.
 
@@ -64,7 +61,10 @@ Not yet run. Planned commands, once credentials are present only in the environm
 pnpm demo:sandbox --preflight
 pnpm demo:sandbox
 pnpm demo:sandbox cleanup
+pnpm console
 ```
+
+`pnpm console` requires `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_API_KEY` and `AIRWALLEX_CARDHOLDER_ID` in the environment and calls the Airwallex sandbox at startup. Open it at <http://127.0.0.1:8787> (not `localhost`; the host check rejects it). State stays in the gitignored `console-data/` directory; the operator terminal prints the approval nonce and the operator token once.
 
 Do not treat a green offline demo as evidence that Airwallex accepted a card, enforced controls, or returned a transaction.
 
