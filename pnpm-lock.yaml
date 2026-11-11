@@ -68,6 +68,9 @@ importers:
       '@sk/policy':
         specifier: workspace:*
         version: link:../policy
+      '@sr/core':
+        specifier: workspace:*
+        version: link:../core
       zod:
         specifier: 3.25.76
         version: 3.25.76

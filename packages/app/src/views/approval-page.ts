@@ -15,8 +15,32 @@ const PRICE_UNVERIFIED_CHIP = 'Price not verified \u2014 no savings claim';
 /** 渲染审批页。nonce 输入框不带 value，页面上只出现 nonceHint。没有内联脚本。 */
 export function renderApprovalPage(model: ApprovalPageModel, options: ApprovalRenderOptions): string {
   const title = `Spendkey \u00b7 ${model.intent}`;
-  const main = `${banner(model)}${heading(model)}${chosenSection(model)}${reasonSection(model)}${comparisonSection(model)}${excludedSection(model)}${cardSection(model)}${decisionSection(model, options)}`;
+  const main = `${banner(model)}${heading(model)}${chosenSection(model)}${reasonSection(model)}${comparisonSection(model)}${excludedSection(model)}${cardSection(model)}${decisionSection(model, options)}${operatorSection(model, options)}`;
   return renderDocument(title, consoleBody(main, 'approvals'));
+}
+
+/** Every operator form asks for the terminal token; it is never passed into the renderer. */
+function operatorSection(model: ApprovalPageModel, options: ApprovalRenderOptions): string {
+  const cardId = model.card?.cardId;
+  const form = (action: string, label: string, extra = '') => `<form method="post" action="${escapeHtml(action)}" autocomplete="off">
+<fieldset><legend>${escapeHtml(label)}</legend>
+<input type="hidden" name="csrf" value="${escapeHtml(options.csrfToken)}">
+<label>Operator token (paste from operator terminal)
+<input name="operatorToken" type="password" required autocomplete="off" spellcheck="false"></label>
+${extra}<button type="submit">${escapeHtml(label)}</button></fieldset></form>`;
+  const forms: string[] = [];
+  if (cardId !== undefined) {
+    if (model.status === 'issued') {
+      forms.push(form(segmentPath(['cards', cardId, 'simulate']), 'Simulate authorization',
+        '<label>Amount<input name="amount" required></label><label>Currency<input name="currency" required pattern="[A-Z]{3}"></label><label>Merchant category<input name="mcc" required pattern="[0-9]{4}"></label>'));
+      forms.push(form('/reconcile', 'Reconcile', `<input type="hidden" name="cardId" value="${escapeHtml(cardId)}">`));
+    }
+    forms.push(form(segmentPath(['cards', cardId, 'freeze']), 'Freeze card'));
+  }
+  if (model.status === 'failed' || model.status === 'issuing') {
+    forms.push(form(segmentPath(['approvals', model.approvalRequestId, 'recover']), 'Recover issuance (lookup only)'));
+  }
+  return forms.length === 0 ? '' : `<section aria-labelledby="operator"><h2 id="operator">Operator actions</h2>${forms.join('')}</section>`;
 }
 
 /** 演示模式下说明自动批准会写进审计日志。 */

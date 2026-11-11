@@ -38,13 +38,16 @@ function respond(response: ServerResponse, status: number, body: string, html = 
 export function createConsoleServer(service: ApprovalService, options: { webhookSecret?: string } = {}) {
   const loop = new TransactionLoop(service);
   return createServer((request, response) => {
+    response.setHeader('Cache-Control', 'no-store');
     void (async () => {
       const url = new URL(request.url ?? '/', 'http://127.0.0.1:8787');
       const path = url.pathname;
       const method = request.method;
       const { store, ledger } = service.options;
       // Reject browser cross-origin writes, including DNS rebinding to this loopback server.
-      if (request.headers.host && !/^127\.0\.0\.1:\d+$/.test(request.headers.host)) throw new ServiceError('invalid_host', 403);
+      if (path !== '/webhooks/airwallex' && request.headers.host && !/^127\.0\.0\.1:\d+$/.test(request.headers.host)) {
+        throw new ServiceError('invalid_host', 403);
+      }
       if (method === 'POST' && request.headers.origin && request.headers.origin !== `http://${request.headers.host}`) {
         throw new ServiceError('invalid_origin', 403);
       }
@@ -85,11 +88,21 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
         }
         let event;
         try { event = parseWebhookEvent(rawBody); } catch { throw new ServiceError('invalid_webhook'); }
-        const deduped = ledger.read().some(({ event: existing }) => existing.kind === 'webhook_received' && existing.eventId === event.id);
-        ledger.append({ kind: 'webhook_received', eventId: event.id, name: event.name, deduped }, service.now().toISOString());
-        if (!deduped && event.name.startsWith('issuing.transaction.')) {
-          const parsed = transactionSchema.safeParse(event.data);
-          if (parsed.success && store.list().some(record => record.card?.cardId === parsed.data.card_id)) loop.observe(parsed.data);
+        const deduped = ledger.read().some(({ event: existing }) => existing.kind === 'webhook_received'
+          && existing.eventId === event.id && existing.processResult === 'success');
+        try {
+          if (!deduped && event.name.startsWith('issuing.transaction.')) {
+            const parsed = transactionSchema.safeParse(event.data);
+            if (!parsed.success) throw new ServiceError('invalid_transaction');
+            if (store.list().some(record => record.card?.cardId === parsed.data.card_id)) loop.observe(parsed.data);
+          }
+          // Only committed processing suppresses provider retries.
+          ledger.append({ kind: 'webhook_received', eventId: event.id, name: event.name, deduped,
+            processResult: 'success' }, service.now().toISOString());
+        } catch {
+          ledger.append({ kind: 'webhook_received', eventId: event.id, name: event.name, deduped: false,
+            processResult: 'error' }, service.now().toISOString());
+          throw new ServiceError('webhook_processing_failed', 500);
         }
         respond(response, 200, '{"ok":true}'); return;
       }
@@ -109,6 +122,17 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
         response.writeHead(303, { Location: `/approvals/${id}`, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
         response.end(); return;
       }
+      // All operator operations, including future recovery routes, belong below this shared guard.
+      // The token is independent of CSRF and is never echoed or persisted.
+      const token = request.headers['x-operator-token'];
+      const principal = service.authenticateOperator(typeof token === 'string' ? token : stringField(input, 'operatorToken'));
+      const recoveryRoute = /^\/approvals\/([a-zA-Z0-9_-]+)\/recover$/.exec(path);
+      if (recoveryRoute) {
+        const id = recoveryRoute[1]!;
+        service.checkCsrf(service.get(id), stringField(input, 'csrf'));
+        await service.recover(id);
+        respond(response, 200, '{"ok":true}'); return;
+      }
       const cardRoute = /^\/cards\/([a-zA-Z0-9_-]+)\/(simulate|freeze)$/.exec(path);
       if (cardRoute || path === '/reconcile') {
         const cardId = cardRoute?.[1] ?? stringField(input, 'cardId');
@@ -119,7 +143,7 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
           const result = await loop.simulate(cardId, { amount: stringField(input, 'amount'), currency: stringField(input, 'currency'), mcc: stringField(input, 'mcc') });
           respond(response, 200, JSON.stringify(result));
         } else if (cardRoute?.[2] === 'freeze') {
-          await loop.freeze(cardId, 'human', 'console freeze'); respond(response, 200, '{"ok":true}');
+          await loop.freeze(cardId, principal.kind, 'console freeze'); respond(response, 200, '{"ok":true}');
         } else {
           if ((input['from'] === undefined) !== (input['to'] === undefined)) throw new ServiceError('invalid_window');
           const window = typeof input['from'] === 'string' && typeof input['to'] === 'string' ? { from: input['from'], to: input['to'] } : undefined;

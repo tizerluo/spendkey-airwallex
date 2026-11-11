@@ -44,13 +44,23 @@ export function spentInWindowMinor(ledger: LedgerStore, currency: string, window
   }
   return Math.max(0, total);
 }
+
+/** Refresh every issued card before the policy reads the shared spending window. */
+export async function reconciledSpendInWindowMinor(service: ApprovalService, currency: string, window = monthWindow(service.now())): Promise<number> {
+  const loop = new TransactionLoop(service);
+  const cardIds = new Set(service.options.store.list().filter(record => record.status === 'issued').map(record => record.card?.cardId));
+  for (const cardId of cardIds) if (cardId !== undefined) await loop.reconcile(cardId, window);
+  return spentInWindowMinor(service.options.ledger, currency, window);
+}
 export class TransactionLoop {
   constructor(readonly service: ApprovalService) {}
-  #ownedCard(id: string): void {
-    if (!this.service.options.store.list().some(record => record.card?.cardId === id)) throw new ServiceError('card_not_found', 404);
+  #ownedCard(id: string, issuedOnly = false): void {
+    const record = this.service.options.store.list().find(record => record.card?.cardId === id);
+    if (!record) throw new ServiceError('card_not_found', 404);
+    if (issuedOnly && record.status !== 'issued') throw new ServiceError('card_not_issued', 409);
   }
   async simulate(cardId: string, input: { amount: string; currency: string; mcc: string }) {
-    this.#ownedCard(cardId);
+    this.#ownedCard(cardId, true);
     if (!/^[A-Z]{3}$/.test(input.currency) || !/^\d{4}$/.test(input.mcc)) throw new ServiceError('invalid_simulation');
     try { if (signedDecimalToMinor(input.amount, input.currency) <= 0) throw new Error(); }
     catch { throw new ServiceError('invalid_simulation'); }
@@ -76,7 +86,7 @@ export class TransactionLoop {
     this.service.options.ledger.append({ kind: 'card_frozen', cardId, by, reason }, this.service.now().toISOString());
   }
   async reconcile(cardId: string, window = monthWindow(this.service.now())) {
-    this.#ownedCard(cardId);
+    this.#ownedCard(cardId, true);
     if (!z.string().datetime().safeParse(window.from).success || !z.string().datetime().safeParse(window.to).success
       || window.from > window.to) throw new ServiceError('invalid_window');
     const { client, ledger } = this.service.options;

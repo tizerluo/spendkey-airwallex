@@ -1,12 +1,10 @@
 import { mkdirSync } from 'node:fs';
 import { AirwallexClient, loadAirwallexConfig } from '@sk/airwallex';
 import { openJsonlLedger } from '@sk/ledger';
-import { runAgent } from '@sk/agent';
-import { createCuratedSource } from '@sk/offers';
 import { ApprovalService } from './service.js';
 import { JsonApprovalStore } from './store.js';
 import { createConsoleServer } from './http.js';
-import { monthWindow, spentInWindowMinor } from './transactions.js';
+import { seedDesignCoRequest } from './seed.js';
 
 let cleanup = () => { /* startup has not opened resources */ };
 try {
@@ -38,13 +36,7 @@ try {
   }
   // Seed a reviewable DesignCo request. Agent gets read-only balance access.
   try {
-    await runAgent({ intent: 'design tool', usage: { horizonMonths: 12 }, sources: [createCuratedSource()], ledger,
-      approvalService: service, ctx: {
-        balanceProvider: () => client.getBalances(), spentInWindowMinor: () => spentInWindowMinor(ledger, 'USD', monthWindow(service.now())),
-        knownObligations: [{ currency: 'USD', amountMinor: 10_000, dueInDays: 15 }], reserveHorizonDays: 30,
-        reserveFloorMinor: { USD: 50_000 }, budgetCurrency: 'USD', windowBudgetMinor: 100_000,
-        maxCommitmentMonths: 12, billingCountry: 'US', cardCountry: 'US',
-      } });
+    await seedDesignCoRequest(service);
   } catch { console.error('Agent request unavailable; console and existing approvals remain available.'); }
 } catch {
   cleanup();

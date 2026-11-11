@@ -7,12 +7,12 @@ import { InMemoryLedgerStore, verifyChain, signedDecimalToMinor, type LedgerStor
 import { termsHash } from '@sk/policy';
 import { ApprovalService } from '../server/service.js';
 import { MemoryApprovalStore, type ApprovalStore } from '../server/store.js';
-import { monthWindow, spentInWindowMinor, TransactionLoop } from '../server/transactions.js';
+import { reconciledSpendInWindowMinor, TransactionLoop } from '../server/transactions.js';
 import { createFakeAirwallex } from './fake-airwallex.js';
 
-export function demoContext(client: AirwallexClient, ledger: LedgerStore, now: () => Date): AgentContext {
+export function demoContext(service: ApprovalService): AgentContext {
   return {
-    balanceProvider: () => client.getBalances(), spentInWindowMinor: () => spentInWindowMinor(ledger, 'USD', monthWindow(now())), now,
+    balanceProvider: () => service.options.client.getBalances(), spentInWindowMinor: () => reconciledSpendInWindowMinor(service, 'USD'), now: service.now,
     knownObligations: [{ currency: 'USD', amountMinor: 10_000, dueInDays: 15 }],
     reserveHorizonDays: 30, reserveFloorMinor: { USD: 50_000 }, budgetCurrency: 'USD',
     windowBudgetMinor: 100_000, maxCommitmentMonths: 12, billingCountry: 'US', cardCountry: 'US',
@@ -36,10 +36,11 @@ export async function runDemo(options: {
   const service = new ApprovalService({ client, ledger, store, now, demoMode: true,
     cardholderId: options.cardholderId ?? 'cardholder_test_01',
     printNonce(line) { operatorNonce = line.slice(line.lastIndexOf(': ') + 2); options.log?.(line); },
+    printOperatorToken(line) { options.log?.(line); },
   });
   const loop = new TransactionLoop(service);
   say(options.client ? 'Airwallex sandbox demo; synthetic offers; demo-operator auto-approval' : 'OFFLINE sandbox simulation; synthetic offers and fake Airwallex; demo-operator auto-approval');
-  const ctx = demoContext(client, ledger, now);
+  const ctx = demoContext(service);
   if (options.client) {
     const balances = await client.getBalances();
     const usd = balances.find(balance => balance.currency === 'USD');

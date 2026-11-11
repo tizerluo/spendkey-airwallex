@@ -21,7 +21,7 @@ describe('agent trust boundary', () => {
       const privileged = ['ap' + 'prove', 'approvalTo' + 'CardInput'];
       expect(source).not.toMatch(new RegExp(`\\b(${privileged.join('|')})\\b`));
       expect(source).not.toMatch(/(?:from\s*|import\s*\()["'][^"']*(?:airwallex|app\/|policy\/)/);
-      expect(source).not.toMatch(/import\s*\*|import\s*\(/);
+      expect(source).not.toMatch(/import\s*\*|import\s*\(|\brequire\b|\bcreateRequire\b|\bexport\b[^;]*\bfrom\s*["']/);
     }
     const lint = readFileSync(new URL('../../../eslint.config.js', import.meta.url), 'utf8');
     expect(lint).toContain('no-restricted-imports');

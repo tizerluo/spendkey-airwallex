@@ -18,6 +18,34 @@ text, so it must stay a hint such as "nonce printed in operator terminal".
 If the hint string itself contains the nonce, that secret will show up on the
 page. The nonce input never has a `value`.
 
+## Operator operations
+
+Startup prints `OPERATOR TOKEN: ...` once. The service retains only its SHA-256
+digest and compares digests in constant time. Supply the token in
+`X-Operator-Token` or paste it into the console's empty `operatorToken` password
+field. Simulate, freeze, reconcile, and `POST /approvals/:id/recover` also require
+the approval's CSRF field. Tokens are never returned in responses or persisted
+in the approval store or ledger. A console freeze records the authenticated
+operator as `by: "human"`; internal agent freezes remain `by: "agent"`.
+
+Simulate and reconcile require approval status `issued`. Freeze is available
+for any known card, including an unconfirmed issuance. Recovery requires a
+previous issuance attempt and looks up the original request id; it never
+creates another card. Repeated recovery failures share one
+`card_issue_unconfirmed` event per approval.
+
+New requests expire within one hour and at most 20 requests may remain
+`requested`. Startup expires stale requests and prints fresh nonces for the
+remaining open requests. The CLI reuses an open DesignCo request. Both CLI and
+demo reconcile issued cards before the agent evaluates its spending budget;
+polling errors stop that decision.
+
+Every HTTP response uses `Cache-Control: no-store`, including redirects and
+errors. Only `/webhooks/airwallex` bypasses the loopback Host check, and that
+endpoint still verifies the signature over raw bytes. Webhook receipts record
+`processResult: "success"` after processing; errors record `"error"` and remain
+eligible for provider retries.
+
 ## Views
 
 ```ts

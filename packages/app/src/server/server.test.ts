@@ -9,8 +9,10 @@ import { InMemoryLedgerStore, verifyChain } from '@sk/ledger';
 import { termsHash, type ApprovalRequest } from '@sk/policy';
 import { CONSOLE_CSP } from '../views/html.js';
 import { createFakeAirwallex } from '../demo/fake-airwallex.js';
+import { demoContext } from '../demo/run.js';
 import { createConsoleServer } from './http.js';
-import { ApprovalService } from './service.js';
+import { ApprovalService, digest } from './service.js';
+import { seedDesignCoRequest } from './seed.js';
 import { JsonApprovalStore, MemoryApprovalStore, type ApprovalStore } from './store.js';
 import { monthWindow, spentInWindowMinor, TransactionLoop } from './transactions.js';
 
@@ -27,14 +29,16 @@ async function fixture(options: { unconfirmedCreate?: boolean; store?: ApprovalS
   const fake = createFakeAirwallex({ now, ...(options.unconfirmedCreate ? { unconfirmedCreate: true } : {}) });
   const client = new AirwallexClient(loadAirwallexConfig({ AIRWALLEX_CLIENT_ID: 'test-client-id', AIRWALLEX_API_KEY: 'test-api-key' }), { fetch: fake.fetch });
   const ledger = new InMemoryLedgerStore(); const store = options.store ?? new MemoryApprovalStore();
-  const printed: string[] = [];
-  const service = new ApprovalService({ client, ledger, store, now, cardholderId: 'cardholder_test_01', printNonce: line => printed.push(line) });
+  const printed: string[] = []; const operatorLines: string[] = [];
+  const service = new ApprovalService({ client, ledger, store, now, cardholderId: 'cardholder_test_01', printNonce: line => printed.push(line),
+    printOperatorToken: line => operatorLines.push(line) });
+  const operatorToken = operatorLines[0]!.split(': ')[1]!;
   const request = approvalRequest(); if (options.noMcc) delete request.merchantCategoryCode;
   const submitted = await service.submit(request);
   const nonce = printed[0]!.split(': ')[1]!;
   const fields = { nonce, csrf: service.get(submitted.id).csrf, presentedTermsHash: termsHash(request),
     ...(options.noMcc ? { merchantCategoryCode: '7372' } : {}) };
-  return { service, client, ledger, store, fake, request, nonce, fields, printed, loop: new TransactionLoop(service),
+  return { service, client, ledger, store, fake, request, nonce, fields, printed, operatorToken, operatorLines, loop: new TransactionLoop(service),
     setTime(value: string) { time = new Date(value); },
     grant: () => service.grant(request.approvalRequestId, fields),
   };
@@ -53,8 +57,10 @@ async function start(service: ApprovalService, webhookSecret?: string) {
   return async (path: string, body?: unknown, headers: Record<string, string> = {}, raw?: string) => {
     const data = raw ?? (body === undefined ? undefined : JSON.stringify(body));
     return new Promise<{ status: number; text: string; headers: import('node:http').IncomingHttpHeaders }>((resolve, reject) => {
+      const requestHeaders = { ...(data === undefined ? {} : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }), ...headers };
+      if (headers['Content-Type'] === '') delete requestHeaders['Content-Type'];
       const req = httpRequest({ hostname: '127.0.0.1', port: address.port, path, method: data === undefined ? 'GET' : 'POST',
-        headers: { ...(data === undefined ? {} : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }), ...headers },
+        headers: requestHeaders,
       }, response => {
         const parts: Buffer[] = []; response.on('data', (chunk: Buffer) => parts.push(chunk));
         response.on('end', () => resolve({ status: response.statusCode!, text: Buffer.concat(parts).toString(), headers: response.headers }));
@@ -130,6 +136,7 @@ describe('durable approval state machine', () => {
     await expect(f.grant()).rejects.toThrow('card_issue_unconfirmed');
     await expect(f.service.issue(f.request.approvalRequestId)).rejects.toThrow('card_issue_unconfirmed');
     expect(f.client.createCard).toHaveBeenCalledOnce();
+    expect(f.ledger.read().filter(({ event }) => event.kind === 'card_issue_unconfirmed')).toHaveLength(1);
   });
   it('persists the approval JSON atomically and excludes the plaintext nonce', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'spendkey-store-')); const path = join(dir, 'approvals.json');
@@ -146,6 +153,133 @@ describe('durable approval state machine', () => {
 });
 
 describe('HTTP approval boundary and console', () => {
+  it('caps lifetimes at one hour, allows canonical retries, and bounds open requests at 20', async () => {
+    const f = await fixture(); const send = await start(f.service);
+    const reordered = Object.fromEntries(Object.entries(f.request).reverse());
+    expect((await send('/approvals', reordered)).status).toBe(201);
+    // Fields outside the binding terms hash must still participate in conflicts.
+    expect((await send('/approvals', { ...f.request, product: 'Other test product' })).status).toBe(409);
+    expect((await send('/approvals', { ...f.request, approvalRequestId: 'too_long_test', expiresAt: '2026-11-11T11:00:00.001Z' })).status).toBe(400);
+    for (let i = 1; i < 20; i++) {
+      expect((await send('/approvals', { ...f.request, approvalRequestId: `request_cap_test_${i}`, expiresAt: '2026-11-11T11:00:00.000Z' })).status).toBe(201);
+    }
+    expect((await send('/approvals', f.request)).status).toBe(201);
+    expect((await send('/approvals', { ...f.request, approvalRequestId: 'request_over_cap_test' })).status).toBe(429);
+    expect(f.store.list()).toHaveLength(20);
+    f.setTime('2026-11-11T10:16:00.000Z');
+    expect((await send('/approvals', { ...f.request, approvalRequestId: 'request_after_expiry_test', expiresAt: '2026-11-11T10:30:00.000Z' })).status).toBe(201);
+  });
+  it('rotates startup operator tokens and pending nonces, expires stale requests, and avoids duplicate DesignCo seeds', async () => {
+    const f = await fixture();
+    const stale = { ...f.store.get(f.request.approvalRequestId)!, request: approvalRequest({ approvalRequestId: 'stale_test',
+      createdAt: '2026-11-11T09:00:00.000Z', expiresAt: instant }) };
+    f.store.save(stale);
+    const restarted = new ApprovalService(f.service.options);
+    expect(f.operatorLines).toHaveLength(2);
+    const freshToken = f.operatorLines[1]!.split(': ')[1]!;
+    expect(freshToken).not.toBe(f.operatorToken);
+    expect(() => restarted.authenticateOperator(f.operatorToken)).toThrow('operator_token_required');
+    expect(restarted.authenticateOperator(freshToken)).toEqual({ kind: 'human' });
+    expect(restarted.get('stale_test').status).toBe('expired');
+    const freshNonce = f.printed[1]!.split(': ')[1]!;
+    expect(freshNonce).not.toBe(f.nonce);
+    await expect(restarted.grant(f.request.approvalRequestId, f.fields)).rejects.toThrow('nonce_required');
+    const count = f.ledger.read().length;
+    await seedDesignCoRequest(restarted);
+    expect(f.ledger.read()).toHaveLength(count);
+    expect(f.store.list().filter(record => record.status === 'requested')).toHaveLength(1);
+    await restarted.grant(f.request.approvalRequestId, { ...f.fields, nonce: freshNonce });
+    expect(f.fake.createCalls).toBe(1);
+  });
+  it('rejects oversized bodies and missing Content-Type; every response including redirects is no-store', async () => {
+    const f = await fixture(); const send = await start(f.service);
+    const responses = [
+      await send('/approvals', {}, {}, 'x'.repeat(64 * 1024 + 1)),
+      await send('/approvals', {}, { 'Content-Type': '' }),
+      await send('/approvals/request_test_01/approve', { ...f.fields, nonce: 'wrong-test-nonce' }),
+      await send('/missing'), await send('/'), await send('/audit'), await send('/audit.jsonl'),
+      await send('/approvals/request_test_01/approve', f.fields),
+    ];
+    expect(responses.map(response => response.status)).toEqual([413, 415, 403, 404, 200, 200, 200, 303]);
+    for (const response of responses) expect(response.headers['cache-control']).toBe('no-store');
+  });
+  it.each(['', 'wrong-test-operator-token'])('blocks scraped CSRF on every operator route without a valid operator token (%s)', async operatorToken => {
+    const f = await fixture(); await f.grant(); const send = await start(f.service);
+    const page = await send('/approvals/request_test_01');
+    const csrf = /name="csrf" value="([^"]+)"/.exec(page.text)![1]!;
+    expect(csrf).toBe(f.fields.csrf);
+    const count = f.ledger.read().length;
+    const simulate = vi.spyOn(f.client, 'simulateAuthorization');
+    const freeze = vi.spyOn(f.client, 'freezeCard'); const list = vi.spyOn(f.client, 'listTransactions');
+    const lookup = vi.spyOn(f.client, 'findCardByRequestId');
+    for (const path of ['/cards/card_test_1/simulate', '/cards/card_test_1/freeze', '/reconcile', '/approvals/request_test_01/recover']) {
+      const response = await send(path, { csrf, cardId: 'card_test_1', amount: '1.00', currency: 'USD', mcc: '7372', operatorToken });
+      expect(response.status).toBe(403);
+      expect(JSON.parse(response.text)).toEqual({ error: 'operator_token_required' });
+    }
+    for (const spy of [simulate, freeze, list, lookup]) expect(spy).not.toHaveBeenCalled();
+    expect(f.ledger.read()).toHaveLength(count);
+  });
+  it('keeps CSRF as a second layer on all operator routes', async () => {
+    const f = await fixture(); await f.grant(); const send = await start(f.service);
+    for (const path of ['/cards/card_test_1/simulate', '/cards/card_test_1/freeze', '/reconcile', '/approvals/request_test_01/recover']) {
+      const response = await send(path, { cardId: 'card_test_1', operatorToken: f.operatorToken });
+      expect(response.status).toBe(403); expect(JSON.parse(response.text)).toEqual({ error: 'csrf_required' });
+    }
+  });
+  it('accepts a pasted form operator token, attributes freeze to the principal, and never echoes or persists the token', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'spendkey-operator-')); const path = join(dir, 'approvals.json');
+    const store = new JsonApprovalStore(path);
+    try {
+      const f = await fixture({ store }); await f.grant(); const send = await start(f.service);
+      expect(f.operatorLines).toEqual([`OPERATOR TOKEN: ${f.operatorToken}`]);
+      const page = await send('/approvals/request_test_01');
+      expect(page.text).toContain('name="operatorToken" type="password" required');
+      expect(page.text).not.toMatch(/name="operatorToken"[^>]*\bvalue=/);
+      const form = new URLSearchParams({ csrf: f.fields.csrf, operatorToken: f.operatorToken }).toString();
+      const response = await send('/cards/card_test_1/freeze', {}, { 'Content-Type': 'application/x-www-form-urlencoded' }, form);
+      expect(response.status).toBe(200);
+      expect(f.ledger.read().at(-1)?.event).toMatchObject({ kind: 'card_frozen', by: 'human' });
+      const failed = await send('/cards/card_test_1/freeze', { operatorToken: f.operatorToken, csrf: 'wrong-test-csrf' });
+      const output = JSON.stringify([page, response, failed, f.ledger.read(), f.store.list(), f.service]) + readFileSync(path, 'utf8');
+      for (const secret of [f.operatorToken, digest(f.operatorToken)]) expect(output).not.toContain(secret);
+      for (const route of ['/', '/approvals/request_test_01', '/audit', '/audit.jsonl']) {
+        const current = await send(route);
+        expect(current.text).not.toContain(f.operatorToken); expect(current.text).not.toContain(digest(f.operatorToken));
+      }
+      expect(f.operatorLines).toHaveLength(1);
+    } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
+  it.each(['requested', 'approved', 'issuing', 'failed'] as const)('blocks simulation/reconciliation on a %s card but allows a safe freeze', async status => {
+    const f = await fixture(); const record = await f.grant(); record.status = status; f.store.save(record);
+    const send = await start(f.service); const auth = { csrf: f.fields.csrf, operatorToken: f.operatorToken, cardId: 'card_test_1' };
+    const simulate = vi.spyOn(f.client, 'simulateAuthorization'); const list = vi.spyOn(f.client, 'listTransactions');
+    expect((await send('/cards/card_test_1/simulate', { ...auth, amount: '1.00', currency: 'USD', mcc: '7372' })).status).toBe(409);
+    expect((await send('/reconcile', auth)).status).toBe(409);
+    expect(simulate).not.toHaveBeenCalled(); expect(list).not.toHaveBeenCalled();
+    expect((await send('/cards/card_test_1/freeze', auth)).status).toBe(200);
+    expect(f.ledger.read().at(-1)?.event).toMatchObject({ kind: 'card_frozen', by: 'human' });
+    expect((await send('/cards/card_test_unknown/freeze', auth)).status).toBe(404);
+  });
+  it('recovers only attempted issuance by lookup, preserves request identity, and dedupes unconfirmed events', async () => {
+    const f = await fixture(); const send = await start(f.service);
+    const auth = { csrf: f.fields.csrf, operatorToken: f.operatorToken };
+    expect((await send('/approvals/request_test_01/recover', auth)).status).toBe(409);
+    expect(f.fake.createCalls).toBe(0);
+    const create = f.client.createCard.bind(f.client);
+    vi.spyOn(f.client, 'createCard').mockImplementationOnce(async input => { await create(input); throw new Error('test_response_lost'); });
+    await expect(f.grant()).rejects.toThrow('card_issue_unconfirmed');
+    const requestId = f.service.get(f.request.approvalRequestId).input!.request_id;
+    const lookup = vi.spyOn(f.client, 'findCardByRequestId').mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('test_lookup_failed'));
+    expect((await send('/approvals/request_test_01/recover', auth)).status).toBe(409);
+    expect((await send('/approvals/request_test_01/recover', auth)).status).toBe(409);
+    expect((await send('/approvals/request_test_01/recover', auth)).status).toBe(200);
+    expect(lookup).toHaveBeenCalledTimes(3);
+    expect(lookup).toHaveBeenLastCalledWith(requestId, { cardholderId: 'cardholder_test_01' });
+    expect(f.client.createCard).toHaveBeenCalledOnce(); expect(f.fake.createCalls).toBe(1);
+    expect(f.service.get(f.request.approvalRequestId).status).toBe('issued');
+    expect(f.ledger.read().filter(({ event }) => event.kind === 'card_issue_unconfirmed')).toHaveLength(1);
+  });
   it.each(['', 'wrong-test-nonce'])('requires the terminal nonce (%s)', async nonce => {
     const f = await fixture(); const send = await start(f.service);
     const response = await send('/approvals/request_test_01/approve', { ...f.fields, nonce });
@@ -214,6 +348,92 @@ describe('HTTP approval boundary and console', () => {
 });
 
 describe('signed webhooks and transaction loop', () => {
+  it('processes a legacy receipt without a success marker before deduping it', async () => {
+    const f = await fixture(); await f.grant(); const key = 'test-webhook-key'; const send = await start(f.service, key);
+    f.ledger.append({ kind: 'webhook_received', eventId: 'event_legacy_test', name: 'issuing.transaction.succeeded', deduped: false }, instant);
+    const timestamp = String(Date.parse(instant));
+    const raw = JSON.stringify({ id: 'event_legacy_test', name: 'issuing.transaction.succeeded', created_at: instant, data: {
+      transaction_id: 'transaction_legacy_test', card_id: 'card_test_1', transaction_amount: '1.00', transaction_currency: 'USD', status: 'SUCCEEDED',
+    } });
+    const headers = { 'x-timestamp': timestamp, 'x-signature': createHmac('sha256', key).update(timestamp).update(raw).digest('hex') };
+    expect((await send('/webhooks/airwallex', {}, headers, raw)).status).toBe(200);
+    expect(f.ledger.read().at(-1)?.event).toMatchObject({ processResult: 'success', deduped: false });
+    expect(f.ledger.read().filter(({ event }) => event.kind === 'authorization')).toHaveLength(1);
+    expect((await send('/webhooks/airwallex', {}, headers, raw)).status).toBe(200);
+    expect(f.ledger.read().at(-1)?.event).toMatchObject({ processResult: 'success', deduped: true });
+  });
+  it('records a ledger-rejected transaction amount as a processing error on every retry', async () => {
+    const f = await fixture(); await f.grant(); const key = 'test-webhook-key'; const send = await start(f.service, key);
+    const timestamp = String(Date.parse(instant));
+    const raw = JSON.stringify({ id: 'event_invalid_amount_test', name: 'issuing.transaction.succeeded', created_at: instant, data: {
+      transaction_id: 'transaction_invalid_amount_test', card_id: 'card_test_1', transaction_amount: '0.001', transaction_currency: 'USD', status: 'SUCCEEDED',
+    } });
+    const headers = { 'x-timestamp': timestamp, 'x-signature': createHmac('sha256', key).update(timestamp).update(raw).digest('hex') };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await send('/webhooks/airwallex', {}, headers, raw);
+      expect(response.status).toBe(500); expect(response.headers['cache-control']).toBe('no-store');
+    }
+    expect(f.ledger.read().filter(({ event }) => event.kind === 'webhook_received').map(({ event }) => event)).toMatchObject([
+      { processResult: 'error', deduped: false }, { processResult: 'error', deduped: false },
+    ]);
+    expect(f.ledger.read().filter(({ event }) => event.kind === 'authorization')).toHaveLength(0);
+    expect(verifyChain(f.ledger.read()).ok).toBe(true);
+  });
+  it('allows a webhook tunnel host only on the exact signature-protected path', async () => {
+    const f = await fixture(); const key = 'test-webhook-key'; const send = await start(f.service, key);
+    const timestamp = String(Date.parse(instant)); const raw = JSON.stringify({ id: 'event_tunnel_test', name: 'issuing.card.updated', created_at: instant, data: {} });
+    const signature = createHmac('sha256', key).update(timestamp).update(raw).digest('hex');
+    const headers = { Host: 'synthetic-tunnel.example', 'x-timestamp': timestamp, 'x-signature': signature };
+    expect((await send('/webhooks/airwallex', {}, headers, raw)).status).toBe(200);
+    expect((await send('/webhooks/airwallex', {}, { ...headers, 'x-signature': 'invalid-test-signature' }, raw)).status).toBe(401);
+    for (const route of ['/', '/approvals', '/webhooks/airwallex/other', '/webhooks/airwallex/']) {
+      expect((await send(route, {}, headers, raw)).status).toBe(403);
+    }
+  });
+  it.each(['observation', 'receipt'] as const)('records %s failures and processes a provider retry before deduping it', async failure => {
+    const f = await fixture(); await f.grant(); const key = 'test-webhook-key'; const send = await start(f.service, key);
+    const timestamp = String(Date.parse(instant));
+    const raw = JSON.stringify({ id: 'event_retry_test', name: 'issuing.transaction.succeeded', created_at: instant, data: {
+      transaction_id: 'transaction_retry_test', card_id: 'card_test_1', transaction_amount: '10.00', transaction_currency: 'USD', status: 'SUCCEEDED',
+    } });
+    const headers = { 'x-timestamp': timestamp, 'x-signature': createHmac('sha256', key).update(timestamp).update(raw).digest('hex') };
+    const append = f.ledger.append.bind(f.ledger); let failed = false;
+    vi.spyOn(f.ledger, 'append').mockImplementation((event, at) => {
+      if (!failed && (failure === 'observation' ? event.kind === 'authorization' : event.kind === 'webhook_received')) {
+        failed = true; throw new Error('test_storage_failure');
+      }
+      return append(event, at);
+    });
+    expect((await send('/webhooks/airwallex', {}, headers, raw)).status).toBe(500);
+    expect(f.ledger.read().at(-1)?.event).toMatchObject({ kind: 'webhook_received', processResult: 'error', deduped: false });
+    expect((await send('/webhooks/airwallex', {}, headers, raw)).status).toBe(200);
+    expect((await send('/webhooks/airwallex', {}, headers, raw)).status).toBe(200);
+    expect(f.ledger.read().filter(({ event }) => event.kind === 'webhook_received').map(({ event }) => event)).toMatchObject([
+      { processResult: 'error', deduped: false }, { processResult: 'success', deduped: false }, { processResult: 'success', deduped: true },
+    ]);
+    expect(f.ledger.read().filter(({ event }) => event.kind === 'authorization')).toHaveLength(1);
+    expect(verifyChain(f.ledger.read()).ok).toBe(true);
+  });
+  it('reconciles current spend before both demo and CLI agent decisions and fails closed on polling errors', async () => {
+    const f = await fixture(); await f.grant();
+    await f.loop.simulate('card_test_1', { amount: '10.00', currency: 'USD', mcc: '7372' });
+    expect(spentInWindowMinor(f.ledger, 'USD', monthWindow(f.service.now()))).toBe(0);
+    expect(await demoContext(f.service).spentInWindowMinor()).toBe(1000);
+    await f.loop.simulate('card_test_1', { amount: '5.00', currency: 'USD', mcc: '7372' });
+    const start = f.ledger.read().length;
+    await seedDesignCoRequest(f.service);
+    const events = f.ledger.read().slice(start).map(({ event }) => event.kind);
+    expect(events.indexOf('reconciliation')).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf('reconciliation')).toBeLessThan(events.indexOf('decision'));
+    expect(spentInWindowMinor(f.ledger, 'USD', monthWindow(f.service.now()))).toBe(1500);
+    const open = f.store.list().find(record => record.status === 'requested')!;
+    f.service.reject(open.request.approvalRequestId, open.csrf);
+    vi.spyOn(f.client, 'listTransactions').mockRejectedValue(new Error('test_poll_failed'));
+    await expect(demoContext(f.service).spentInWindowMinor()).rejects.toThrow('test_poll_failed');
+    const before = f.ledger.read().filter(({ event }) => event.kind === 'decision').length;
+    await expect(seedDesignCoRequest(f.service)).rejects.toThrow('test_poll_failed');
+    expect(f.ledger.read().filter(({ event }) => event.kind === 'decision')).toHaveLength(before);
+  });
   it('returns 404 without a configured webhook secret', async () => {
     const f = await fixture(); const send = await start(f.service);
     expect((await send('/webhooks/airwallex', {})).status).toBe(404);
@@ -239,19 +459,20 @@ describe('signed webhooks and transaction loop', () => {
   });
   it('enforces MONTHLY aggregate, MCC, currency, freeze, and emits reconciliation via routes', async () => {
     const f = await fixture(); await f.grant(); const send = await start(f.service);
-    const simulate = (amount: string, currency = 'USD', mcc = '7372') => send('/cards/card_test_1/simulate', { amount, currency, mcc, csrf: f.fields.csrf });
+    const operatorHeaders = { 'X-Operator-Token': f.operatorToken };
+    const simulate = (amount: string, currency = 'USD', mcc = '7372') => send('/cards/card_test_1/simulate', { amount, currency, mcc, csrf: f.fields.csrf }, operatorHeaders);
     expect(JSON.parse((await simulate('40.00')).text)).toEqual({ mapped: 'approved' });
     expect(JSON.parse((await simulate('25.00')).text)).toEqual({ mapped: 'limit_exceeded' });
     expect(JSON.parse((await simulate('1.00', 'USD', '5812')).text)).toEqual({ mapped: 'merchant_category_not_allowed' });
     expect(JSON.parse((await simulate('1.00', 'EUR')).text)).toEqual({ mapped: 'currency_not_allowed' });
-    expect((await send('/cards/card_test_1/freeze', { csrf: 'wrong' })).status).toBe(403);
-    expect((await send('/cards/card_test_1/freeze', { csrf: f.fields.csrf })).status).toBe(200);
+    expect((await send('/cards/card_test_1/freeze', { csrf: 'wrong' }, operatorHeaders)).status).toBe(403);
+    expect((await send('/cards/card_test_1/freeze', { csrf: f.fields.csrf }, operatorHeaders)).status).toBe(200);
     expect(JSON.parse((await simulate('1.00')).text)).toEqual({ mapped: 'card_inactive' });
-    const reconciliation = await send('/reconcile', { cardId: 'card_test_1', csrf: f.fields.csrf });
+    const reconciliation = await send('/reconcile', { cardId: 'card_test_1', csrf: f.fields.csrf }, operatorHeaders);
     expect(JSON.parse(reconciliation.text)).toMatchObject({ settledMinor: 4000, pendingMinor: 0, failedCount: 4 });
     expect(f.store.get(f.request.approvalRequestId)?.card?.status).toBe('INACTIVE');
     expect((await send('/audit')).text).toContain('INACTIVE');
-    expect(f.ledger.read().map(({ event }) => event.kind)).toContain('card_frozen');
+    expect(f.ledger.read().find(({ event }) => event.kind === 'card_frozen')?.event).toMatchObject({ by: 'human' });
     expect(verifyChain(f.ledger.read()).ok).toBe(true);
   });
   it('sums signed settled and pending amounts, excludes failed, and dedupes polls and pages', async () => {

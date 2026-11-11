@@ -17,6 +17,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@sr/core": "workspace:*",
     "@sk/ledger": "workspace:*",
     "@sk/policy": "workspace:*",
     "@sk/airwallex": "workspace:*",

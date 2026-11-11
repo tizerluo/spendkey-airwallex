@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { approve, approvalRequestSchema, approvalToCardInput, termsHash, type ApprovalRequest } from '@sk/policy';
 import { cardRequestIdFromApproval, type AirwallexClient, type Card } from '@sk/airwallex';
 import { redactValue, type LedgerStore } from '@sk/ledger';
+import { canonicalize } from '@sr/core';
 import type { ApprovalRecord, ApprovalStore } from './store.js';
 
 export class ServiceError extends Error {
@@ -14,12 +15,32 @@ export function equalSecret(a: string, b: string): boolean {
 export interface ServiceOptions {
   store: ApprovalStore; ledger: LedgerStore; client: AirwallexClient;
   cardholderId: string; now?: () => Date; printNonce?: (line: string) => void;
+  printOperatorToken?: (line: string) => void;
   demoMode?: boolean;
 }
 export class ApprovalService {
   readonly now: () => Date;
   readonly #inflight = new Map<string, Promise<ApprovalRecord>>();
-  constructor(readonly options: ServiceOptions) { this.now = options.now ?? (() => new Date()); }
+  readonly #operatorTokenHash: Buffer;
+  constructor(readonly options: ServiceOptions) {
+    this.now = options.now ?? (() => new Date());
+    const token = randomBytes(32).toString('hex');
+    this.#operatorTokenHash = Buffer.from(digest(token), 'hex');
+    (options.printOperatorToken ?? console.log)(`OPERATOR TOKEN: ${token}`);
+    // Restart invalidates old terminal nonces and makes pending requests reviewable again.
+    for (const saved of options.store.list()) {
+      const record = this.get(saved.request.approvalRequestId);
+      if (record.status !== 'requested') continue;
+      const nonce = randomBytes(24).toString('hex');
+      record.nonceHash = digest(nonce); options.store.save(record);
+      (options.printNonce ?? console.log)(`APPROVAL NONCE ${record.request.approvalRequestId}: ${nonce}`);
+    }
+  }
+  authenticateOperator(token: string): { kind: 'human' } {
+    const matches = timingSafeEqual(Buffer.from(digest(token), 'hex'), this.#operatorTokenHash);
+    if (!token || !matches) throw new ServiceError('operator_token_required', 403);
+    return { kind: 'human' };
+  }
   get(id: string): ApprovalRecord {
     const record = this.options.store.get(id);
     if (!record) throw new ServiceError('approval_not_found', 404);
@@ -37,11 +58,16 @@ export class ApprovalService {
     if (Date.parse(request.createdAt) > this.now().getTime() || Date.parse(request.expiresAt) <= this.now().getTime()) {
       throw new ServiceError('approval_expired');
     }
+    if (Date.parse(request.expiresAt) - this.now().getTime() > 60 * 60_000) throw new ServiceError('approval_lifetime_exceeded');
     const existing = this.options.store.get(request.approvalRequestId);
     if (existing) {
-      if (JSON.stringify(existing.request) !== JSON.stringify(request)) throw new ServiceError('request_id_conflict', 409);
+      if (termsHash(existing.request) !== termsHash(request) || canonicalize(existing.request) !== canonicalize(request)) {
+        throw new ServiceError('request_id_conflict', 409);
+      }
       return { id: request.approvalRequestId };
     }
+    const open = this.options.store.list().filter(record => this.get(record.request.approvalRequestId).status === 'requested');
+    if (open.length >= 20) throw new ServiceError('too_many_open_requests', 429);
     const nonce = randomBytes(24).toString('hex');
     const record: ApprovalRecord = { request, status: 'requested', nonceHash: digest(nonce), csrf: randomBytes(24).toString('hex') };
     this.options.store.save(record);
@@ -93,6 +119,11 @@ export class ApprovalService {
     this.options.ledger.append({ kind: 'approval_rejected', approvalRequestId: id, code: 'human_rejected' }, this.now().toISOString());
   }
   /** Internal operator recovery: an attempted issuance is ONLY looked up, never created anew. */
+  recover(id: string): Promise<ApprovalRecord> {
+    const record = this.get(id);
+    if (!record.attempted) throw new ServiceError('recovery_not_attempted', 409);
+    return this.issue(id);
+  }
   issue(id: string): Promise<ApprovalRecord> {
     const pending = this.#inflight.get(id);
     if (pending) return pending;
@@ -113,11 +144,10 @@ export class ApprovalService {
       record.status = 'expired'; this.options.store.save(record); throw new ServiceError('approval_expired', 409);
     }
     this.#recordGrant(record);
-    let unconfirmedLogged = false;
     let card: Card | undefined = record.card?.cardId === undefined ? undefined : { card_id: record.card.cardId };
     try {
       if (record.attempted) {
-        card ??= await this.options.client.findCardByRequestId(input.request_id, { cardholderId: input.cardholder_id });
+        card = await this.options.client.findCardByRequestId(input.request_id, { cardholderId: input.cardholder_id }) ?? card;
       } else {
         record.status = 'issuing'; record.attempted = true; this.options.store.save(record);
         const result = await this.options.client.createCard(input);
@@ -125,7 +155,6 @@ export class ApprovalService {
         // Persist even a partial ID immediately, including when later diagnostics/polling fail.
         if (card) { record.card = { cardId: card.card_id }; this.options.store.save(record); }
         if (result.unconfirmed) {
-          unconfirmedLogged = true;
           const ref = randomUUID();
           this.options.ledger.append({ kind: 'card_issue_unconfirmed', approvalId: approval.approvalId,
             requestId: input.request_id, reason: 'response_shape_unconfirmed', rawResponseRef: ref }, this.now().toISOString());
@@ -155,9 +184,11 @@ export class ApprovalService {
       return record;
     } catch {
       record.status = 'failed'; this.options.store.save(record);
-      if (!unconfirmedLogged) this.options.ledger.append({ kind: 'card_issue_unconfirmed',
-        approvalId: approval.approvalId, requestId: input.request_id, reason: 'issuance_or_activation_unconfirmed',
-      }, this.now().toISOString());
+      if (!this.options.ledger.read().some(({ event }) => event.kind === 'card_issue_unconfirmed' && event.approvalId === approval.approvalId)) {
+        this.options.ledger.append({ kind: 'card_issue_unconfirmed',
+          approvalId: approval.approvalId, requestId: input.request_id, reason: 'issuance_or_activation_unconfirmed',
+        }, this.now().toISOString());
+      }
       throw new ServiceError('card_issue_unconfirmed', 409);
     }
   }

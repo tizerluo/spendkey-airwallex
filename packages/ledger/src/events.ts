@@ -77,7 +77,8 @@ const CardAuditEventUnion = z.discriminatedUnion('kind', [
     settledMinor: z.number().int().safe(), pendingMinor: z.number().int().safe(),
     failedCount: minor, transactionIds: z.array(text),
   }).strict(),
-  z.object({ kind: z.literal('webhook_received'), eventId: text, name: text, deduped: z.boolean() }).strict(),
+  z.object({ kind: z.literal('webhook_received'), eventId: text, name: text, deduped: z.boolean(),
+    processResult: z.enum(['success', 'error']).optional() }).strict(),
   z.object({ kind: z.literal('raw_response'), ref: text, endpoint: text, status: z.number().int().min(100).max(599), body: requiredUnknown }).strict(),
 ]);
 
