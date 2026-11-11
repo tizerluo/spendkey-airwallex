@@ -3,6 +3,7 @@ import type { z } from 'zod';
 import { configApiKey } from './config.js';
 import type { AirwallexConfig } from './config.js';
 import { AirwallexApiError, AirwallexResponseError, AirwallexSafetyError } from './errors.js';
+import type { AirwallexResponseIssue } from './errors.js';
 import { nonJsonDiagnostic, redactBody } from './redact.js';
 import {
   authorizationControlsInputSchema, balancesSchema, cardholderInputSchema, cardholderSchema,
@@ -15,10 +16,74 @@ import type {
   Card, CardsResponse, CreateCardResult, ListCardsInput, ListTransactionsInput, SimulateAuthorizationInput,
 } from './schemas.js';
 
+/** 默认 30 秒。AbortSignal.timeout 的计时器是 unref 的，完成的请求不会把进程挂住。 */
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
 export interface AirwallexClientOptions {
   fetch: typeof globalThis.fetch;
   /** Injectable clock for deterministic offline token-expiry tests. */
   now?: () => number;
+  /** 单次 HTTP 超时（毫秒）。默认 30000。测试可注入更短的值。 */
+  timeoutMs?: number;
+}
+
+function requestTimeout(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_REQUEST_TIMEOUT_MS;
+  if (!Number.isInteger(value) || value < 1 || value > 2_147_483_647) {
+    throw new AirwallexSafetyError('Invalid request timeout');
+  }
+  return value;
+}
+
+/** 即使注入的 fetch 忽略 signal，也要在超时后失败，不能一直挂起。 */
+function raceSignal<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      settle();
+    };
+    const onAbort = () => finish(() => reject(signal.reason));
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort);
+    work.then(
+      value => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
+}
+
+function isTimeoutReason(error: unknown, depth = 0): boolean {
+  if (depth > 4 || error === null || typeof error !== 'object') return false;
+  if ('name' in error && error.name === 'TimeoutError') return true;
+  if (!('cause' in error)) return false;
+  return isTimeoutReason((error as { cause?: unknown }).cause, depth + 1);
+}
+
+function isTimeoutFailure(error: unknown, signal: AbortSignal): boolean {
+  return isTimeoutReason(error) || (signal.aborted && isTimeoutReason(signal.reason));
+}
+
+/** 只收集路径和代码。union 展开到子问题，避免把 message / received 带出来。 */
+function zodIssues(error: z.ZodError): AirwallexResponseIssue[] {
+  const collected: AirwallexResponseIssue[] = [];
+  const visit = (issues: readonly z.ZodIssue[]): void => {
+    for (const issue of issues) {
+      if (collected.length >= 32) return;
+      if (issue.code === 'invalid_union' && issue.unionErrors.some(item => item.issues.length > 0)) {
+        visit(issue.unionErrors.flatMap(item => item.issues));
+        continue;
+      }
+      const path = issue.path.map(segment => (
+        typeof segment === 'string' || typeof segment === 'number' ? String(segment) : '_'
+      )).join('.');
+      collected.push({ path, code: issue.code });
+    }
+  };
+  visit(error.issues);
+  return collected;
 }
 
 /** Stable card idempotency key: reuse this approval's ID across createCard calls. */
@@ -72,6 +137,7 @@ export class AirwallexClient {
   #apiKey: string;
   #fetch: typeof globalThis.fetch;
   #now: () => number;
+  #timeoutMs: number;
   #session: { token: string; expiresAt: number } | undefined;
   /** Retain the most recently replaced or invalidated token for error redaction. */
   #lastToken: string | undefined;
@@ -82,6 +148,7 @@ export class AirwallexClient {
     this.#config = config;
     this.#fetch = options.fetch;
     this.#now = options.now ?? Date.now;
+    this.#timeoutMs = requestTimeout(options.timeoutMs);
   }
 
   #redact(value: string): string {
@@ -94,20 +161,28 @@ export class AirwallexClient {
 
   async #send(path: string, init: RequestInit): Promise<Response> {
     assertSafeCardPath(path);
+    // 超时只抛一次。createCard 不会在这里重试，调用方走既有的只查不建恢复。
+    const signal = AbortSignal.timeout(this.#timeoutMs);
     try {
       // Never follow a redirect carrying credentials to a different destination.
-      return await this.#fetch(`${this.#config.baseUrl}${path}`, { ...init, redirect: 'error' });
-    } catch {
+      return await raceSignal(
+        this.#fetch(`${this.#config.baseUrl}${path}`, { ...init, redirect: 'error', signal }),
+        signal,
+      );
+    } catch (error) {
+      if (isTimeoutFailure(error, signal)) {
+        throw new AirwallexApiError(0, 'NETWORK_TIMEOUT', 'Airwallex request timed out');
+      }
       throw new AirwallexApiError(0, 'NETWORK_ERROR', 'Airwallex request failed');
     }
   }
 
-  async #read<T>(response: Response, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<T> {
+  async #read<T>(response: Response, schema: z.ZodType<T, z.ZodTypeDef, unknown>, endpoint: string): Promise<T> {
     let body: unknown;
     try { body = await response.json(); }
     catch {
       if (!response.ok) throw new AirwallexApiError(response.status, 'UNKNOWN', 'Airwallex API request failed');
-      throw new AirwallexResponseError();
+      throw new AirwallexResponseError(endpoint);
     }
     if (!response.ok) {
       const record = typeof body === 'object' && body !== null ? body as Record<string, unknown> : {};
@@ -118,7 +193,7 @@ export class AirwallexClient {
       );
     }
     const parsed = schema.safeParse(body);
-    if (!parsed.success) throw new AirwallexResponseError();
+    if (!parsed.success) throw new AirwallexResponseError(endpoint, zodIssues(parsed.error));
     // Schemas redact unknown data; additionally scrub credential echoes in diagnostics.
     const scrubDiagnostics = (value: unknown): void => {
       if (value === null || typeof value !== 'object') return;
@@ -136,7 +211,7 @@ export class AirwallexClient {
     const response = await this.#send('/api/v1/authentication/login', {
       method: 'POST', headers: { 'x-client-id': this.#config.clientId, 'x-api-key': this.#apiKey },
     });
-    const result = await this.#read(response, loginSchema);
+    const result = await this.#read(response, loginSchema, '/api/v1/authentication/login');
     this.#lastToken = this.#session?.token ?? this.#lastToken;
     this.#session = { token: result.token, expiresAt: Date.parse(result.expires_at) };
     return result.token;
@@ -173,7 +248,7 @@ export class AirwallexClient {
   }
 
   async #request<T>(method: 'GET' | 'POST', path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, body?: unknown): Promise<T> {
-    return this.#read(await this.#requestResponse(method, path, body), schema);
+    return this.#read(await this.#requestResponse(method, path, body), schema, path);
   }
 
   #cardPath(id: string, suffix = ''): string {
@@ -208,8 +283,8 @@ export class AirwallexClient {
   async #createCard(body: unknown): Promise<CreateCardResult> {
     const response = await this.#requestResponse('POST', '/api/v1/issuing/cards/create', body);
     if (!response.ok) {
-      await this.#read(response, cardSchema);
-      throw new AirwallexResponseError();
+      await this.#read(response, cardSchema, '/api/v1/issuing/cards/create');
+      throw new AirwallexResponseError('/api/v1/issuing/cards/create');
     }
     let received: unknown;
     try {
