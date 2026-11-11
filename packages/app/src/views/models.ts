@@ -10,12 +10,24 @@ export type ApprovalStatus =
   | 'rejected'
   | 'expired';
 
-/** 报价价格是否经过核对。未核对的价格不能当成已节省的金额。 */
+/**
+ * 报价价格是否经过核对。与 @sk/policy ApprovalRequest 和账本 offers_snapshot 一致。
+ * 未核对的价格不能当成已节省的金额。
+ */
 export type PriceStatus = 'verified' | 'price_unverified';
+
+/** 与 ApprovalRequest.interval、账本 approval_requested.interval 相同。 */
+export type ChargeInterval = 'PER_TRANSACTION' | 'MONTHLY' | 'ALL_TIME';
+
+/** 与 ApprovalRequest.allowedTransactionCount、账本 approval_requested 相同。 */
+export type AllowedTransactionCount = 'SINGLE' | 'MULTIPLE';
+
+/** 与 ApprovalRequest.rail 相同。不是 card 的条款不能在页面上批准。 */
+export type PaymentRail = 'card' | 'x402';
 
 /**
  * 当前准备让人批准的那一条条款。
- * amount 已是展示用字符串，视图不再做货币换算。
+ * amount 已是展示用字符串，由 buildApprovalPageModel 用金额工具格式化。
  */
 export interface ApprovalChosenTerms {
   offerId: string;
@@ -24,11 +36,12 @@ export interface ApprovalChosenTerms {
   plan: string;
   amount: string;
   currency: string;
-  interval: string;
-  allowedTransactionCount: string;
+  interval: ChargeInterval;
+  allowedTransactionCount: AllowedTransactionCount;
   merchantCategoryCode?: string;
   commitmentMonths: number;
   priceStatus: PriceStatus;
+  rail: PaymentRail;
 }
 
 /** 比较表的一行。rail 为 x402 时必须标明不能用卡支付。 */

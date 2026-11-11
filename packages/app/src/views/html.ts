@@ -80,7 +80,6 @@ section { margin-top: 1.5rem; }
 dl { display: grid; grid-template-columns: minmax(8rem, 14rem) minmax(0, 1fr); gap: 0.35rem 1rem; margin: 0.8rem 0 0; }
 dt { color: #57534e; }
 dd { margin: 0; overflow-wrap: anywhere; }
-.hash-row { display: grid; gap: 0.5rem; max-width: 40rem; }
 .hash {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   overflow-wrap: anywhere;
@@ -103,6 +102,10 @@ tr.x402 { background: #fff7ed; }
 .badge-bad { background: #fff1f2; color: #9f1239; }
 .error { color: #9f1239; font-weight: 700; }
 .decision { display: grid; gap: 0.75rem; max-width: 32rem; }
+fieldset { border: 0; margin: 0; padding: 0; min-inline-size: 0; }
+fieldset:disabled { opacity: 0.55; }
+.warning { color: #92400e; font-weight: 700; }
+tr.unconfirmed { background: #fffbeb; }
 label { display: block; font-weight: 600; margin-top: 0.8rem; }
 input[type="text"] {
   width: 100%;
@@ -126,8 +129,16 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 `;
 
-/** 拼出完整 HTML 文档。tail 只能是写死的增强脚本，不能拼接页面数据。 */
-export function renderDocument(title: string, body: string, tail = ''): string {
+/**
+ * 这些文档对应的 Content-Security-Policy。
+ * 样式是内联的，所以 style-src 允许 'unsafe-inline'。
+ * 页面没有脚本、外链和框架，default-src 'none' 会拦住 script。
+ * 服务器应原样发送这个值，不要再放宽 script-src。
+ */
+export const CONSOLE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+
+/** 拼出完整 HTML 文档。没有脚本，调用方不能再往文档末尾追加内容。 */
+export function renderDocument(title: string, body: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -140,7 +151,6 @@ export function renderDocument(title: string, body: string, tail = ''): string {
 </head>
 <body>
 ${body}
-${tail}
 </body>
 </html>
 `;
@@ -160,6 +170,6 @@ export function consoleBody(main: string): string {
 ${main}
 </main>
 <footer>
-<p>Sandbox console for approval and audit. Display masked card numbers only.</p>
+<p>Sandbox console for approval and audit. Card numbers on these pages are masked.</p>
 </footer>`;
 }

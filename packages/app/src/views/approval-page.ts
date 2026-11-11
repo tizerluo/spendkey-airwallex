@@ -7,33 +7,16 @@ import type {
   ApprovalPageModel,
   ApprovalRenderOptions,
   ApprovalStatus,
+  PaymentRail,
 } from './models.js';
 
 const PRICE_UNVERIFIED_CHIP = 'Price not verified \u2014 no savings claim';
 
-// 复制哈希只是增强。按钮默认隐藏，没有脚本时人仍然能选中哈希并提交表单。
-const COPY_HASH_SCRIPT = `<script>
-(function () {
-  var button = document.querySelector('[data-copy-hash]');
-  var node = document.querySelector('[data-terms-hash]');
-  if (!button || !node || !navigator.clipboard) return;
-  button.hidden = false;
-  button.addEventListener('click', function () {
-    var value = node.textContent || '';
-    navigator.clipboard.writeText(value).then(function () {
-      button.textContent = 'Copied';
-    }, function () {
-      button.textContent = 'Copy unavailable';
-    });
-  });
-}());
-</script>`;
-
-/** 渲染审批页。nonce 输入框不带 value，页面上只出现 nonceHint。 */
+/** 渲染审批页。nonce 输入框不带 value，页面上只出现 nonceHint。没有内联脚本。 */
 export function renderApprovalPage(model: ApprovalPageModel, options: ApprovalRenderOptions): string {
   const title = `Spendkey \u00b7 ${model.intent}`;
   const main = `${banner(model)}${heading(model)}${chosenSection(model)}${reasonSection(model)}${comparisonSection(model)}${excludedSection(model)}${cardSection(model)}${decisionSection(model, options)}`;
-  return renderDocument(title, consoleBody(main), COPY_HASH_SCRIPT);
+  return renderDocument(title, consoleBody(main));
 }
 
 /** 演示模式下说明自动批准会写进审计日志。 */
@@ -82,6 +65,7 @@ function chosenSection(model: ApprovalPageModel): string {
 <p class="amount"><span class="num">${escapeHtml(chosen.amount)}</span> ${escapeHtml(chosen.currency)}</p>
 <dl>
 <dt>Offer</dt><dd>${escapeHtml(chosen.offerId)}</dd>
+<dt>Rail</dt><dd>${escapeHtml(railText(chosen.rail))}</dd>
 <dt>Plan</dt><dd>${escapeHtml(chosen.plan)}</dd>
 <dt>Amount</dt><dd>${escapeHtml(chosen.amount)} ${escapeHtml(chosen.currency)}</dd>
 <dt>Interval</dt><dd>${escapeHtml(intervalText(chosen.interval))}</dd>
@@ -90,9 +74,9 @@ function chosenSection(model: ApprovalPageModel): string {
 <dt>Commitment</dt><dd>${escapeHtml(commitmentText(chosen.commitmentMonths))}</dd>
 <dt>Price status</dt><dd>${escapeHtml(chosen.priceStatus)}</dd>
 <dt>Expires</dt><dd><time datetime="${escapeHtml(model.expiresAt)}">${escapeHtml(model.expiresAt)}</time></dd>
-<dt>Terms hash</dt><dd><div class="hash-row"><code class="hash" data-terms-hash>${escapeHtml(model.presentedTermsHash)}</code><button type="button" data-copy-hash hidden>Copy hash</button></div></dd>
+<dt>Terms hash</dt><dd><code class="hash">${escapeHtml(model.presentedTermsHash)}</code></dd>
 </dl>
-<p class="hint"><span title="what this binds: offer, vendor, plan, currency, amount, interval, single or multiple charges, merchant category, commitment, and expiry">what this binds</span> is the offer, vendor, plan, currency, amount, interval, single or multiple charges, merchant category, commitment, and expiry. Approving submits this hash unchanged.</p>
+<p class="hint">what this binds is the offer, vendor, plan, rail, currency, amount, interval, single or multiple charges, merchant category, commitment, and expiry. Approving submits this hash unchanged.</p>
 </section>`;
 }
 
@@ -208,8 +192,9 @@ function notesCell(notes: readonly string[]): string {
   return `<ul>${notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('')}</ul>`;
 }
 
-/** 通过与失败的规则代码。 */
+/** 通过与失败的规则代码。x402 不能用卡支付，结果列不再写成 Passed。 */
 function resultCell(row: ApprovalComparisonRow): string {
+  if (row.rail === 'x402') return 'Not payable by card';
   if (row.passed) return 'Passed';
   if (row.failedCodes.length === 0) return 'Failed';
   return `Failed: ${row.failedCodes.map((code) => escapeHtml(code)).join(', ')}`;
@@ -262,26 +247,45 @@ function pair(term: string, value: string | undefined): string {
   return `<dt>${escapeHtml(term)}</dt><dd>${escapeHtml(value)}</dd>`;
 }
 
-/** 批准与拒绝是两个独立表单，避免一次提交带上另一边的字段。 */
+/** 把绑定进哈希的 rail 原样展示。x402 同时标明不能用卡支付。 */
+function railText(rail: PaymentRail): string {
+  if (rail === 'x402') return 'x402 (not payable by card)';
+  return rail;
+}
+
+/** 批准与拒绝是两个独立表单，避免一次提交带上另一边的字段。非 requested 时禁用整个 fieldset。 */
 function decisionSection(model: ApprovalPageModel, options: ApprovalRenderOptions): string {
   const locked = model.status === 'requested' ? '' : ' disabled';
+  const reject = `<form class="reject-form" method="post" action="${escapeHtml(segmentPath(['approvals', model.approvalRequestId, 'reject']))}" autocomplete="off">
+<fieldset${locked}>
+<input type="hidden" name="csrf" value="${escapeHtml(options.csrfToken)}" autocomplete="off">
+<button type="submit" class="reject" aria-describedby="request-status">Reject</button>
+</fieldset>
+</form>`;
+  if (model.chosen.rail !== 'card') {
+    return `<section aria-labelledby="decision"><h2 id="decision">Decision</h2>
+<div class="decision">
+<p class="warning">This rail is not payable by card, so the page has no approval form.</p>
+${reject}
+</div>
+</section>`;
+  }
   const summary = decisionSummary(model);
   return `<section aria-labelledby="decision"><h2 id="decision">Decision</h2>
 <div class="decision">
 <form class="approve-form" method="post" action="${escapeHtml(segmentPath(['approvals', model.approvalRequestId, 'approve']))}" autocomplete="off">
+<fieldset${locked}>
 <p>${escapeHtml(summary)}</p>
 <label for="approval-nonce">Approval nonce</label>
 <p id="nonce-hint" class="hint">${escapeHtml(model.nonceHint)}</p>
 <input id="approval-nonce" name="nonce" type="text" required autocomplete="off" spellcheck="false" aria-describedby="nonce-hint">
 ${mccField(model)}
 <input type="hidden" name="presentedTermsHash" value="${escapeHtml(model.presentedTermsHash)}">
-<input type="hidden" name="csrf" value="${escapeHtml(options.csrfToken)}">
-<button type="submit" class="approve" aria-describedby="request-status"${locked}>Approve exactly these terms</button>
+<input type="hidden" name="csrf" value="${escapeHtml(options.csrfToken)}" autocomplete="off">
+<button type="submit" class="approve" aria-describedby="request-status">Approve exactly these terms</button>
+</fieldset>
 </form>
-<form class="reject-form" method="post" action="${escapeHtml(segmentPath(['approvals', model.approvalRequestId, 'reject']))}" autocomplete="off">
-<input type="hidden" name="csrf" value="${escapeHtml(options.csrfToken)}">
-<button type="submit" class="reject" aria-describedby="request-status"${locked}>Reject</button>
-</form>
+${reject}
 </div>
 </section>`;
 }
@@ -294,7 +298,7 @@ function decisionSummary(model: ApprovalPageModel): string {
     : model.needsMcc
       ? 'merchant category required at approval'
       : 'merchant category not set';
-  return `Amount ${chosen.amount} ${chosen.currency}, ${intervalText(chosen.interval)}, ${chargeText(chosen.allowedTransactionCount)}, ${category}, commitment ${commitmentText(chosen.commitmentMonths)}.`;
+  return `Rail ${chosen.rail}, amount ${chosen.amount} ${chosen.currency}, ${intervalText(chosen.interval)}, ${chargeText(chosen.allowedTransactionCount)}, ${category}, commitment ${commitmentText(chosen.commitmentMonths)}.`;
 }
 
 /** needsMcc 为真才输出商户类别输入框。条款里已有代码时预填，提交值与页面展示一致。 */

@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  CONSOLE_CSP,
   escapeHtml,
   renderApprovalPage,
   renderAuditPage,
@@ -30,6 +31,7 @@ function sampleApproval(): ApprovalPageModel {
       allowedTransactionCount: 'MULTIPLE',
       commitmentMonths: 12,
       priceStatus: 'price_unverified',
+      rail: 'card',
     },
     presentedTermsHash: 'terms-hash-test-01',
     reasons: ['human_approval_required', 'price_unverified', 'mcc_required_at_approval'],
@@ -99,6 +101,13 @@ function sampleAudit(): AuditPageModel {
   };
 }
 
+/** 三个页面都不能带脚本、内联事件或 javascript: URL。 */
+function expectNoActiveContent(html: string): void {
+  expect(html.includes('<script')).toBe(false);
+  expect(html).not.toMatch(/ on\w+=/);
+  expect(html.toLowerCase().includes('javascript:')).toBe(false);
+}
+
 function formSlice(html: string, action: string): string {
   const marker = `action="${action}"`;
   const start = html.indexOf(marker);
@@ -135,12 +144,9 @@ describe('renderApprovalPage', () => {
     expect(html).toContain(ESCAPED);
     expect(html).not.toContain(PAYLOAD);
     expect(html).not.toContain('alert("x")');
-    expect(html.split('<script>')).toHaveLength(2);
-    expect(html.split('</script>')).toHaveLength(2);
-    const script = html.slice(html.indexOf('<script>'), html.lastIndexOf('</script>'));
-    expect(script).not.toContain(PAYLOAD);
-    expect(script).not.toContain(model.presentedTermsHash);
-    expect(script).not.toContain(CSRF);
+    expect(html).not.toContain('Copy hash');
+    expect(html).not.toContain('data-copy-hash');
+    expectNoActiveContent(html);
   });
 
   it('属性值里的引号和尖括号也被转义', () => {
@@ -191,7 +197,7 @@ describe('renderApprovalPage', () => {
     const html = renderApprovalPage(sampleApproval(), { csrfToken: CSRF });
     expect(html).toContain('not payable by card (x402)');
     expect(html).toContain('class="x402"');
-    expect(html).toContain('rail_not_card');
+    expect(html).toContain('Not payable by card');
     expect(html).toContain('region_unavailable');
     expect(html).toContain('Unavailable in the billing or card region, so this offer was excluded from comparison.');
     expect(html).toContain('offer_region_01');
@@ -223,7 +229,8 @@ describe('renderApprovalPage', () => {
       'Demo: auto-approval by demo-operator is labelled in the audit log',
       'fits the monthly budget',
       'Passed',
-      'Failed: rail_not_card',
+      'Not payable by card',
+      '<dt>Rail</dt><dd>card</dd>',
       'card_test_01',
       '****0000',
       'Required at approval',
@@ -237,6 +244,11 @@ describe('renderApprovalPage', () => {
 
     expect(html).toContain('<button type="submit" class="approve" aria-describedby="request-status">Approve exactly these terms</button>');
     expect(html).toContain('<button type="submit" class="reject" aria-describedby="request-status">Reject</button>');
+    expect(html).toContain('<fieldset>');
+    expect(html).not.toContain('<fieldset disabled>');
+    expect(html).not.toContain('title=');
+    expect(html).toContain('Card numbers on these pages are masked.');
+    expectNoActiveContent(html);
 
     const approve = formSlice(html, '/approvals/approval_request_test_01/approve');
     expect(approve).toContain('method="post"');
@@ -264,13 +276,52 @@ describe('renderApprovalPage', () => {
     );
   });
 
-  it('非 requested 状态禁用批准和拒绝', () => {
+  it('非 requested 状态禁用整个 fieldset', () => {
     const model = sampleApproval();
     model.status = 'expired';
     const html = renderApprovalPage(model, { csrfToken: CSRF });
     expect(html).toContain('Expired (expired)');
-    expect(html).toContain('<button type="submit" class="approve" aria-describedby="request-status" disabled>Approve exactly these terms</button>');
-    expect(html).toContain('<button type="submit" class="reject" aria-describedby="request-status" disabled>Reject</button>');
+    expect(html.match(/<fieldset disabled>/g)).toHaveLength(2);
+    expect(html).not.toMatch(/<fieldset>/);
+    const approve = formSlice(html, '/approvals/approval_request_test_01/approve');
+    expect(approve).toContain('<fieldset disabled>');
+    expect(approve).toContain('name="nonce"');
+    expect(approve).toContain('name="merchantCategoryCode"');
+    expectNoActiveContent(html);
+  });
+
+  it('x402 即使规则通过，结果列也是 Not payable by card', () => {
+    const model = sampleApproval();
+    const row = model.comparison[1];
+    if (row === undefined) throw new Error('missing x402 row');
+    model.comparison[1] = { ...row, passed: true, failedCodes: [] };
+    const html = renderApprovalPage(model, { csrfToken: CSRF });
+    const start = html.indexOf('offer_x402_01');
+    const rowHtml = html.slice(start, html.indexOf('</tr>', start));
+    expect(rowHtml).toContain('Not payable by card');
+    expect(rowHtml).not.toContain('Passed');
+    expectNoActiveContent(html);
+  });
+
+  it('选中的 rail 不是 card 时不渲染批准表单', () => {
+    const model = sampleApproval();
+    model.chosen = { ...model.chosen, rail: 'x402' };
+    const html = renderApprovalPage(model, { csrfToken: CSRF });
+    expect(html).toContain('<dt>Rail</dt><dd>x402 (not payable by card)</dd>');
+    expect(html).toContain('This rail is not payable by card, so the page has no approval form.');
+    expect(html).not.toContain('/approve');
+    expect(html).not.toContain('name="nonce"');
+    expect(html).toContain('action="/approvals/approval_request_test_01/reject"');
+    expectNoActiveContent(html);
+  });
+
+  it('卡通道失败时结果列写出失败代码', () => {
+    const model = sampleApproval();
+    const row = model.comparison[0];
+    if (row === undefined) throw new Error('missing card row');
+    model.comparison = [{ ...row, passed: false, failedCodes: ['reserve_breach'] }];
+    const html = renderApprovalPage(model, { csrfToken: CSRF });
+    expect(html).toContain('Failed: reserve_breach');
   });
 
   it('审批 id 进路径时按段编码，页面文本仍然转义', () => {
@@ -300,6 +351,45 @@ describe('renderAuditPage', () => {
     expect(html).not.toContain(PAYLOAD);
     expect(html.includes('<script')).toBe(false);
     expect(html).toContain('role="alert"');
+    expectNoActiveContent(html);
+  });
+
+  it('链完整时忽略 verifyError', () => {
+    const model = sampleAudit();
+    model.verifyError = PAYLOAD;
+    const html = renderAuditPage(model);
+    expect(html).toContain('Chain valid');
+    expect(html).not.toContain(ESCAPED);
+    expect(html).not.toContain(PAYLOAD);
+    expect(html).not.toContain('role="alert"');
+  });
+
+  it('授权没有来源时写成 source missing，发卡未确认用警告样式', () => {
+    const model = sampleAudit();
+    const simulated = model.events[1];
+    if (simulated === undefined) throw new Error('missing authorization');
+    model.events[1] = {
+      seq: simulated.seq,
+      at: simulated.at,
+      kind: simulated.kind,
+      summary: simulated.summary,
+      hashShort: simulated.hashShort,
+    };
+    model.events.push({
+      seq: 4,
+      at: '2030-01-01T00:03:00.000Z',
+      kind: 'card_issue_unconfirmed',
+      summary: 'Card issue unconfirmed: response_shape_unconfirmed',
+      hashShort: 'dddd4444',
+    });
+    const html = renderAuditPage(model);
+    expect(html).toContain('<td>source missing</td>');
+    expect(html).toContain('<td>\u2014</td>');
+    expect(html).toContain('sandbox event (observed)');
+    expect(html).toContain('class="unconfirmed"');
+    expect(html).toContain('<strong class="warning">Unconfirmed</strong>');
+    expect(html).toContain('response_shape_unconfirmed');
+    expectNoActiveContent(html);
   });
 
   it('链完整时显示 Chain valid，并区分模拟与观测', () => {
@@ -319,6 +409,7 @@ describe('renderAuditPage', () => {
     expect(html).toContain('<caption>Ledger events</caption>');
     expect(html).toContain('<caption>Cards</caption>');
     expect(html).not.toContain('role="alert"');
+    expectNoActiveContent(html);
   });
 
   it('没有事件和卡片时给出空状态', () => {
@@ -332,6 +423,16 @@ describe('renderAuditPage', () => {
   });
 });
 
+describe('CONSOLE_CSP', () => {
+  it('导出与内联样式匹配、且不含脚本的策略', () => {
+    expect(CONSOLE_CSP).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    );
+    expect(CONSOLE_CSP).not.toContain('unsafe-eval');
+    expect(CONSOLE_CSP).not.toMatch(/script-src[^;]*unsafe-inline/);
+  });
+});
+
 describe('renderIndexPage', () => {
   it('转义供应商，并按顺序链到审批页', () => {
     const html = renderIndexPage({
@@ -342,7 +443,7 @@ describe('renderIndexPage', () => {
     });
     expect(html).toContain(ESCAPED);
     expect(html).not.toContain(PAYLOAD);
-    expect(html.includes('<script')).toBe(false);
+    expectNoActiveContent(html);
     expect(html).toContain('href="/approvals/approval_request_test_01"');
     expect(html).toContain('href="/approvals/a%2Fb"');
     expect(html).toContain('>a/b</a>');
@@ -352,6 +453,33 @@ describe('renderIndexPage', () => {
     expect(html).toContain('<th scope="col">Vendor</th>');
     expect(html).toContain('<caption>Approval requests</caption>');
     expect(html.indexOf('approval_request_test_01')).toBeLessThan(html.indexOf('>a/b</a>'));
+  });
+
+  it('转义 hashShort、status、id、reason 和 cardId', () => {
+    const approval = sampleApproval();
+    approval.reasons = [PAYLOAD];
+    approval.excluded = [{ offerId: 'offer_region_01', reason: PAYLOAD }];
+    approval.card = { cardId: PAYLOAD, maskedNumber: '****0000', status: PAYLOAD };
+    const approvalHtml = renderApprovalPage(approval, { csrfToken: CSRF });
+    expect(approvalHtml).toContain(ESCAPED);
+    expect(approvalHtml).not.toContain(PAYLOAD);
+
+    const audit = sampleAudit();
+    const first = audit.events[0];
+    if (first === undefined) throw new Error('missing audit row');
+    audit.events[0] = { ...first, hashShort: PAYLOAD };
+    audit.cards = [{ cardId: PAYLOAD, status: PAYLOAD, limit: '1.00', currency: 'USD' }];
+    const auditHtml = renderAuditPage(audit);
+    expect(auditHtml).toContain(ESCAPED);
+    expect(auditHtml).not.toContain(PAYLOAD);
+
+    const indexHtml = renderIndexPage({
+      approvals: [{ id: PAYLOAD, status: PAYLOAD, vendor: 'Example Vendor', amount: '1.00', currency: 'USD' }],
+    });
+    expect(indexHtml).toContain(ESCAPED);
+    expect(indexHtml).not.toContain(PAYLOAD);
+    expect(indexHtml).toContain('href="/approvals/%3Cscript%3Ealert(%22x%22)%3C%2Fscript%3E"');
+    expectNoActiveContent(indexHtml);
   });
 
   it('没有审批请求时显示空状态', () => {

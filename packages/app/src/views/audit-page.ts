@@ -19,8 +19,9 @@ function chainBadge(model: AuditPageModel): string {
   return '<strong class="badge badge-bad" role="status">Chain BROKEN</strong>';
 }
 
-/** 校验器返回了错误文本时展示出来。空字符串不占一行。 */
+/** 链完整时忽略校验错误。链断裂且有错误文本时才展示。空字符串不占一行。 */
 function verifyLine(model: AuditPageModel): string {
+  if (model.chainValid) return '';
   if (model.verifyError === undefined || model.verifyError === '') return '';
   return `<p class="error" role="alert">${escapeHtml(model.verifyError)}</p>`;
 }
@@ -48,22 +49,27 @@ ${legend}
 </table></div></section>`;
 }
 
-/** 渲染一条账本事件。 */
+/** 渲染一条账本事件。发卡未确认的行用警告样式，不单靠颜色区分。 */
 function eventRow(event: AuditEventRow): string {
-  return `<tr>
+  const unconfirmed = event.kind === 'card_issue_unconfirmed';
+  const summary = unconfirmed
+    ? `<strong class="warning">Unconfirmed</strong> ${escapeHtml(event.summary)}`
+    : escapeHtml(event.summary);
+  return `<tr${unconfirmed ? ' class="unconfirmed"' : ''}>
 <td class="num">${escapeHtml(String(event.seq))}</td>
 <td><time datetime="${escapeHtml(event.at)}">${escapeHtml(event.at)}</time></td>
 <td><code>${escapeHtml(event.kind)}</code></td>
-<td>${escapeHtml(event.summary)}</td>
-<td>${escapeHtml(sourceLabel(event.source))}</td>
+<td>${summary}</td>
+<td>${escapeHtml(sourceLabel(event))}</td>
 <td><code class="hash">${escapeHtml(event.hashShort)}</code></td>
 </tr>`;
 }
 
-/** simulated 与 observed 使用合同里的固定标签。没有来源时留空占位。 */
-function sourceLabel(source: AuditEventRow['source']): string {
-  if (source === 'simulated') return 'sandbox simulation';
-  if (source === 'observed') return 'sandbox event (observed)';
+/** simulated 与 observed 使用合同里的固定标签。授权缺少来源时明确写成缺失。 */
+function sourceLabel(event: AuditEventRow): string {
+  if (event.source === 'simulated') return 'sandbox simulation';
+  if (event.source === 'observed') return 'sandbox event (observed)';
+  if (event.kind === 'authorization') return 'source missing';
   return '\u2014';
 }
 
