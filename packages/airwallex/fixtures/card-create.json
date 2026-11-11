@@ -1,0 +1,40 @@
+{
+  "cardholder_id": "cardholder_test_01",
+  "created_by": "Test User",
+  "card_status": "ACTIVE",
+  "brand": "VISA",
+  "card_number": "************0000",
+  "form_factor": "VIRTUAL",
+  "is_personalized": true,
+  "program": {
+    "purpose": "COMMERCIAL",
+    "type": "CREDIT",
+    "sub_type": "GOOD_FUNDS_CREDIT"
+  },
+  "nick_name": "test-purchase",
+  "authorization_controls": {
+    "allowed_transaction_count": "MULTIPLE",
+    "allowed_currencies": [
+      "USD"
+    ],
+    "allowed_merchant_categories": [
+      "5734"
+    ],
+    "transaction_limits": {
+      "currency": "USD",
+      "limits": [
+        {
+          "amount": "50.00",
+          "interval": "PER_TRANSACTION"
+        }
+      ]
+    }
+  },
+  "card_id": "card_test_01",
+  "alert_settings": {
+    "low_remaining_transaction_limit": {
+      "enabled": true,
+      "percent": 10
+    }
+  }
+}

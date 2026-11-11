@@ -1,0 +1,55 @@
+{
+  "items": [
+    {
+      "card_id": "card_test_01",
+      "status": "PENDING",
+      "transaction_amount": "20.00",
+      "transaction_currency": "USD",
+      "failure_reason": null,
+      "transaction_id": "transaction_test_01",
+      "transaction_type": "AUTHORIZATION",
+      "transaction_date": "2030-01-01T00:00:00Z"
+    },
+    {
+      "card_id": "card_test_01",
+      "status": "FAILED",
+      "transaction_amount": 80,
+      "transaction_currency": "USD",
+      "failure_reason": "LIMIT_EXCEEDED",
+      "transaction_id": "transaction_test_02",
+      "transaction_type": "AUTHORIZATION",
+      "transaction_date": "2030-01-01T00:00:00Z"
+    },
+    {
+      "card_id": "card_test_01",
+      "status": "FAILED",
+      "transaction_amount": 80,
+      "transaction_currency": "USD",
+      "failure_reason": "MERCHANT_CATEGORY_NOT_ALLOWED",
+      "transaction_id": "transaction_test_03",
+      "transaction_type": "AUTHORIZATION",
+      "transaction_date": "2030-01-01T00:00:00Z"
+    },
+    {
+      "card_id": "card_test_01",
+      "status": "FAILED",
+      "transaction_amount": 80,
+      "transaction_currency": "USD",
+      "failure_reason": "CURRENCY_NOT_ALLOWED",
+      "transaction_id": "transaction_test_04",
+      "transaction_type": "AUTHORIZATION",
+      "transaction_date": "2030-01-01T00:00:00Z"
+    },
+    {
+      "card_id": "card_test_01",
+      "status": "FAILED",
+      "transaction_amount": 80,
+      "transaction_currency": "USD",
+      "failure_reason": "CARD_INACTIVE",
+      "transaction_id": "transaction_test_05",
+      "transaction_type": "AUTHORIZATION",
+      "transaction_date": "2030-01-01T00:00:00Z"
+    }
+  ],
+  "has_more": false
+}

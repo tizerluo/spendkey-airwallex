@@ -1,0 +1,10 @@
+{
+  "currency": "USD",
+  "limits": [
+    {
+      "amount": "50.00",
+      "interval": "PER_TRANSACTION",
+      "remaining": 50
+    }
+  ]
+}

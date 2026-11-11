@@ -1,0 +1,12 @@
+{
+  "primary_currency": "USD",
+  "spending_limit_settings": {
+    "per_transaction_limits": [
+      {
+        "currency": "USD",
+        "default": 10000,
+        "maximum": 50000
+      }
+    ]
+  }
+}

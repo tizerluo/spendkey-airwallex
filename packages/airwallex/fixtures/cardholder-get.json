@@ -1,0 +1,21 @@
+{
+  "status": "READY",
+  "email": "user@example.com",
+  "type": "INDIVIDUAL",
+  "mobile_number": "12025550100",
+  "individual": {
+    "name": {
+      "first_name": "Test",
+      "last_name": "User"
+    },
+    "date_of_birth": "1985-06-20",
+    "address": {
+      "line1": "1 Example Road",
+      "city": "Example City",
+      "state": "ZZ",
+      "postcode": "00000",
+      "country": "US"
+    }
+  },
+  "cardholder_id": "cardholder_test_01"
+}

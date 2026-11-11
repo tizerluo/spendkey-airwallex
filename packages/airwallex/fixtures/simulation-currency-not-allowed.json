@@ -1,0 +1,13 @@
+{
+  "process_result": "DECLINED",
+  "failure_reason": "CURRENCY_NOT_ALLOWED",
+  "card_transaction_id": "transaction_test_04",
+  "card_transaction_lifecycle_id": "lifecycle_test_04",
+  "auth_code": "test-auth-code",
+  "masked_card_number": "************0000",
+  "merchant": {
+    "name": "Test Merchant",
+    "category_code": "5734"
+  },
+  "network_transaction_id": "network_test_04"
+}
