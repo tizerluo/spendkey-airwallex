@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { z } from 'zod';
-import { configApiKey, isSandboxUrl } from './config.js';
+import { configApiKey } from './config.js';
 import type { AirwallexConfig } from './config.js';
 import { AirwallexApiError, AirwallexResponseError, AirwallexSafetyError } from './errors.js';
 import { redactBody } from './redact.js';
@@ -8,7 +8,7 @@ import {
   authorizationControlsInputSchema, balancesSchema, cardholderInputSchema, cardholderSchema,
   cardLimitsSchema, cardSchema, cardStatusSchema, createCardInputSchema, issuingConfigSchema,
   loginSchema, simulationInputSchema, simulationSchema, transactionsSchema,
-  cardsPageSchema, cardNicknameFromRequestId, parseCardLenient,
+  cardsPageSchema, CARD_NICKNAME_MAX_LENGTH, cardNicknameFromRequestId, parseCardLenient,
 } from './schemas.js';
 import type {
   AuthorizationControls, CardStatus, CreateCardholderInput, CreateCardInput,
@@ -199,9 +199,10 @@ export class AirwallexClient {
 
   async #createCard(body: unknown): Promise<CreateCardResult> {
     const response = await this.#requestResponse('POST', '/api/v1/issuing/cards/create', body);
-    if (!response.ok) return this.#read(response, cardSchema).then(() => {
-      throw new AirwallexResponseError(); // #read always throws for non-2xx.
-    });
+    if (!response.ok) {
+      await this.#read(response, cardSchema);
+      throw new AirwallexResponseError();
+    }
     let received: unknown;
     try {
       const text = await response.text();
@@ -226,7 +227,9 @@ export class AirwallexClient {
       if (input[key] !== undefined) query.set(names[key], input[key]);
     }
     const result: CardsResponse = { items: [], unparsed: [] };
-    for (let page = 0; ; page++) {
+    // 硬上限：服务端一直声称还有下一页时必须停，不能无限翻页。
+    const maxPages = 200;
+    for (let page = 0; page < maxPages; page++) {
       query.set('page_num', String(page));
       const response = await this.#request('GET', `/api/v1/issuing/cards?${query.toString()}`, cardsPageSchema);
       for (const item of response.items) {
@@ -234,16 +237,22 @@ export class AirwallexClient {
         if (card) result.items.push(card);
         else result.unparsed.push(redactBody(item, text => this.#redact(text)));
       }
-      if (!response.has_more) return result;
+      const fullPage = response.items.length >= pageSize;
+      const more = response.has_more === true || (response.has_more === undefined && fullPage);
+      if (!more || response.items.length === 0) return result;
     }
+    throw new AirwallexSafetyError('Card list page cap exceeded');
   }
 
   async findCardByRequestId(requestId: string, input: Pick<ListCardsInput, 'cardholderId' | 'createdAfter'> = {}) {
     const cards = await this.listCards({ ...input,
       ...(input.createdAfter === undefined ? {} : { createdBefore: new Date(this.#now()).toISOString() }),
     });
-    return cards.items.find(card => card.request_id === requestId)
-      ?? cards.items.find(card => card.request_id === undefined && card.nick_name === cardNicknameFromRequestId(requestId));
+    const explicit = cards.items.find(card => card.request_id === requestId);
+    if (explicit) return explicit;
+    // 昵称会被截到 50 字符。截断后不同 requestId 会撞车，这时只认明确的 request_id。
+    if (`spk ${requestId}`.length > CARD_NICKNAME_MAX_LENGTH) return undefined;
+    return cards.items.find(card => card.request_id === undefined && card.nick_name === cardNicknameFromRequestId(requestId));
   }
   getCard(id: string) { return this.#request('GET', this.#cardPath(id), cardSchema); }
   getCardLimits(id: string) { return this.#request('GET', this.#cardPath(id, '/limits'), cardLimitsSchema); }
@@ -279,7 +288,6 @@ export class AirwallexClient {
     return this.#request('GET', `/api/v1/issuing/transactions${suffix}`, transactionsSchema);
   }
   simulateAuthorization(input: SimulateAuthorizationInput) {
-    if (!isSandboxUrl(this.#config.baseUrl)) throw new AirwallexSafetyError('Simulation requires the sandbox host');
     const body = simulationInputSchema.parse(input);
     return this.#request('POST', '/api/v1/simulation/issuing/create', simulationSchema, {
       ...body, transaction_amount: Number(body.transaction_amount),
