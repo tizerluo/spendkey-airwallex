@@ -38,9 +38,9 @@ For the local sandbox console, set `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_API_KEY`, a
 
 `pnpm demo:sandbox` runs the same demo against the real Airwallex sandbox with those runtime variables. It refuses missing credentials, needs sufficient USD sandbox funds, and freezes the demo card before finishing. It has **not** been run as part of this task. Sandbox state is durable in `demo-output/sandbox/`. Both demo commands build first.
 
-The DesignCo main line works with the current ledger. Sub-cent unit-price snapshots (including the default x402 source) still require an upstream ledger validation fix.
+Offer snapshots keep sub-cent unit prices (e.g. x402 at `0.001` USD); card transaction amounts use each currency's minor-unit exponent.
 
-The console's card mutation routes require the approval page's CSRF value: `POST /cards/:id/simulate` (`amount`, `currency`, `mcc`, `csrf`), `POST /cards/:id/freeze` (`csrf`), and `POST /reconcile` (`cardId`, `csrf`, optional `from`/`to`). Audit exports are available at `/audit` and `/audit.jsonl`.
+The console's card mutation routes are operator-only: they require the `X-Operator-Token` printed once in the operator terminal at startup (or the console form field) **and** the approval page's CSRF value: `POST /cards/:id/simulate` (`amount`, `currency`, `mcc`, `csrf`), `POST /cards/:id/freeze` (`csrf`), and `POST /reconcile` (`cardId`, `csrf`, optional `from`/`to`). Audit exports are available at `/audit` and `/audit.jsonl`.
 
 ## Development
 
