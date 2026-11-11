@@ -1,4 +1,4 @@
-// 视图测试全部离线：只检查 HTML 字符串，不访问网络。
+// Offline view tests inspect HTML strings without network access.
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -102,7 +102,7 @@ function sampleAudit(): AuditPageModel {
   };
 }
 
-/** 三个页面都不能带脚本、内联事件或 javascript: URL。 */
+/** All pages must exclude scripts, inline handlers, and javascript: URLs. */
 function expectNoActiveContent(html: string): void {
   expect(html.includes('<script')).toBe(false);
   expect(html).not.toMatch(/ on\w+=/);

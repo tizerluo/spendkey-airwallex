@@ -1,4 +1,4 @@
-// 把账本记录和审批请求收成视图模型。摘要和短哈希只在这里定义。
+// Build view models from ledger records and requests; centralize summaries and short hashes.
 
 import type { CardAuditEvent, ChainVerification } from '@sk/ledger';
 import { termsHash, type ApprovalRequest } from '@sk/policy';
@@ -22,10 +22,8 @@ import {
   type ViewAuditEvent,
 } from './run-mode.js';
 
-/**
- * 账本信封。event 比 @sk/ledger 宽，以便在 schema 加入 run_started / controls_readback 之前渲染它们。
- * 服务器传来的 LedgerEvent 可以赋给这个类型。
- */
+/** Ledger envelope with a wider event type for additive view contracts.
+ * Server LedgerEvent records are assignable to this type. */
 export interface LedgerRecord {
   seq: number;
   at: string;
@@ -34,7 +32,7 @@ export interface LedgerRecord {
   event: ViewAuditEvent;
 }
 
-/** 服务器保存的一条审批。比较表从 events 里的账本记录拼出来。 */
+/** Server approval record; comparison rows come from ledger events. */
 export interface ApprovalRecordInput {
   approvalId: string;
   request: ApprovalRequest;
@@ -45,7 +43,7 @@ export interface ApprovalRecordInput {
   events?: readonly LedgerRecord[];
 }
 
-/** 渲染审批页所需的模型和 CSRF。nonce 不在这里。 */
+/** Approval view model and CSRF token; the nonce is excluded. */
 export interface BuiltApprovalPage {
   model: ApprovalPageModel;
   csrfToken: string;
@@ -56,10 +54,8 @@ export interface IndexRecordInput {
   status: ApprovalStatus;
 }
 
-/**
- * 列表金额在这里格式化，并保留调用方的顺序。
- * events 应传入整本账本。不传时没有 run_started，页面写 mode unknown，不会猜成 sandbox。
- */
+/** Format list amounts and preserve caller order.
+ * Pass the full ledger for run mode; omitted events produce mode unknown. */
 export function buildIndexPageModel(
   records: readonly IndexRecordInput[],
   events: readonly LedgerRecord[] = [],
@@ -73,13 +69,13 @@ export function buildIndexPageModel(
   return model;
 }
 
-/** 哈希去掉 0x 前缀后的前 12 个十六进制字符。 */
+/** First 12 hex characters of the hash, excluding an optional 0x prefix. */
 export function hashShort(hash: string): string {
   const body = /^0x/i.test(hash) ? hash.slice(2) : hash;
   return body.slice(0, 12);
 }
 
-/** 由账本记录和链校验结果生成审计页模型。链完整时忽略 verifyError。 */
+/** Build the audit model; ignore verifyError when the chain is valid. */
 export function buildAuditPageModel(
   events: readonly LedgerRecord[],
   verifyResult: ChainVerification,
@@ -101,7 +97,7 @@ export function buildAuditPageModel(
   return model;
 }
 
-/** 由服务器上的审批记录生成审批页模型，金额在这里格式化。 */
+/** Build an approval model from a server record and format its amounts. */
 export function buildApprovalPageModel(input: ApprovalRecordInput): BuiltApprovalPage {
   const events = input.events ?? [];
   const request = input.request;
@@ -165,7 +161,7 @@ interface LedgerIndex {
   cardCurrency: Map<string, string>;
 }
 
-/** 先扫一遍金额和币种，后面的授权、对账和卡片表都用这份索引。 */
+/** Index amounts and currencies for authorization, reconciliation, and card rows. */
 function indexLedger(events: readonly LedgerRecord[]): LedgerIndex {
   const requestMoney = new Map<string, RequestMoney>();
   const approvalToRequest = new Map<string, string>();
@@ -185,7 +181,7 @@ function indexLedger(events: readonly LedgerRecord[]): LedgerIndex {
   return { requestMoney, approvalToRequest, cardCurrency };
 }
 
-/** 每种账本事件的摘要。调用方不要再各自写一套。 */
+/** Centralized summaries for each ledger event kind. */
 function summarize(event: ViewAuditEvent, index: LedgerIndex): string {
   switch (event.kind) {
     case 'run_started':
@@ -240,7 +236,7 @@ function summarize(event: ViewAuditEvent, index: LedgerIndex): string {
   }
 }
 
-/** 知道币种就按币种格式化；不知道时保留最小单位，避免猜错小数位。 */
+/** Format known currencies; retain raw minor units when the currency is unknown. */
 function minorText(minor: number, currency: string | undefined): string {
   if (currency === undefined) return `${minor} minor`;
   try { return `${formatMinor(minor, currency)} ${currency}`; }
@@ -400,7 +396,7 @@ function cardFromLedger(
   return found;
 }
 
-/** 条款哈希必须和 @sk/policy 的 termsHash 一致。校验失败时不把请求内容写进错误。 */
+/** Match policy termsHash; validation errors must not expose request contents. */
 function presentedHash(request: ApprovalRequest): string {
   try {
     return termsHash(request);

@@ -36,7 +36,12 @@ previous issuance attempt and looks up the original request id; it never
 creates another card. Repeated recovery failures share one
 `card_issue_unconfirmed` event per approval.
 
-New requests expire within one hour and at most 20 requests may remain
+New requests must start at the exact decision instant, expire within fifteen
+minutes of it, and reference a decision no more than fifteen minutes old.
+Evidence is selected by ledger sequence. Each decision sequence can have only
+one approval record, across every status; identical request-ID retries remain
+idempotent. Legacy records without a sequence conservatively reserve their
+offer throughout their original request window. At most 20 requests may remain
 `requested`. Startup expires stale requests and prints fresh nonces for the
 remaining open requests. The CLI reuses an open DesignCo request. Both CLI and
 demo reconcile issued cards before the agent evaluates its spending budget;
@@ -73,7 +78,7 @@ const approval = buildApprovalPageModel({
 });
 const approvalHtml = renderApprovalPage(approval.model, { csrfToken: approval.csrfToken });
 const auditHtml = renderAuditPage(buildAuditPageModel(ledger.read(), verifyChain(ledger.read())));
-const indexHtml = renderIndexPage(buildIndexPageModel(records));
+const indexHtml = renderIndexPage(buildIndexPageModel(records, ledger.read()));
 response.setHeader('Content-Security-Policy', CONSOLE_CSP);
 formatMinor(5000, 'USD'); // "50.00"
 ```
@@ -213,6 +218,19 @@ throwing stub. These tests never call it. Fixture values are synthetic
 
 ## Operator APIs (M4)
 
-`POST /approvals/:id/abandon` requires `X-Operator-Token` and the approval's `csrf`. It accepts only `failed` records with `attempted: true` and no card ID. A lookup by the original request ID must find no card; a found card is retained for `/recover`. Abandonment records `approval_rejected` with code `operator_abandoned`; restart the console to seed a fresh policy decision/request. Provider failures return `{ error, provider: { status, code, message, step } }` and redacted ledger evidence.
+`POST /approvals/:id/abandon` requires `X-Operator-Token` and the approval's `csrf`. It accepts only `failed` records with `attempted: true` and no card ID. A lookup by the original request ID must find no card; a found card is retained for `/recover`. Abandonment records `approval_rejected` with code `operator_abandoned`. After abandoning, run `pnpm demo:sandbox cleanup` and audit/verify the ledger before another demo: an eventually consistent provider may expose the attempted card later. Cleanup looks up attempted request IDs even on rejected records; repeat cleanup/audit if a card remains uncertain. Restart the console to seed a fresh policy decision/request. Provider failures return `{ error, provider: { status, code, message, step } }` and redacted ledger evidence.
 
-`pnpm demo:sandbox --preflight` checks balances, issuing configuration and the existing cardholder without card mutations or local store writes. `pnpm demo:sandbox cleanup` confirms each stored demo card and freezes every non-INACTIVE card. A stale approval-store lock fails with its age; after confirming the owner stopped, remove `demo-output/sandbox/approvals.json.lock` and run cleanup before another demo. Neither sandbox command has been live verified.
+`pnpm demo:sandbox --preflight` checks balances, issuing configuration and the existing cardholder without card mutations or local store writes. `pnpm demo:sandbox cleanup` confirms each stored demo card and freezes every non-INACTIVE card. A stale approval-store lock fails with its age; after confirming the owner stopped, first remove `demo-output/sandbox/approvals.json.lock`, then run `pnpm demo:sandbox cleanup` and audit/verify before another demo. Cleanup needs to acquire that lock and cannot run until it is removed. Neither sandbox command has been live verified.
+
+Controls readback currently compares the full expected and actual control objects,
+including provider defaults. Amount strings are normalized numerically and arrays
+are compared without ordering. Missing, changed, or extra provider controls fail
+closed: `controls_readback` retains redacted expected/actual evidence, the service
+auto-freezes the card, and failure evidence uses reason `controls_mismatch`.
+Before a live run, check provider defaults against the submitted controls; extra
+keys can cause a conservative mismatch. The current ledger contract has no
+`controls_readback.extra` field, so extras remain in `actual`.
+
+On SIGINT or SIGTERM the demo waits for in-flight issuance, then cleans up and
+exits non-zero. A second signal exits immediately if issuance or cleanup hangs;
+run cleanup and audit/verify afterwards to resolve any uncertain card.

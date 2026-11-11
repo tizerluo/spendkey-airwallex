@@ -1,4 +1,4 @@
-// 审批页：展示将被绑定的条款，并提供不依赖脚本的批准 / 拒绝表单。
+// Approval terms and script-free approve/reject forms.
 
 import { consoleBody, escapeHtml, renderDocument, runModeBlock, segmentPath } from './html.js';
 import type {
@@ -12,7 +12,7 @@ import type {
 
 const PRICE_UNVERIFIED_CHIP = 'Price not verified \u2014 no savings claim';
 
-/** 渲染审批页。nonce 输入框不带 value，页面上只出现 nonceHint。没有内联脚本。 */
+/** Render the approval page with an empty nonce input and only the nonce hint. */
 export function renderApprovalPage(model: ApprovalPageModel, options: ApprovalRenderOptions): string {
   const title = `Spendkey \u00b7 ${model.intent}`;
   const main = `${banner(model)}${runModeBlock(model.runMode)}${heading(model)}${chosenSection(model)}${reasonSection(model)}${comparisonSection(model)}${excludedSection(model)}${cardSection(model)}${decisionSection(model, options)}${operatorSection(model, options)}`;
@@ -43,13 +43,13 @@ ${extra}<button type="submit">${escapeHtml(label)}</button></fieldset></form>`;
   return forms.length === 0 ? '' : `<section aria-labelledby="operator"><h2 id="operator">Operator actions</h2>${forms.join('')}</section>`;
 }
 
-/** 演示模式下说明自动批准会写进审计日志。 */
+/** Explain demo auto-approval and its audit trail. */
 function banner(model: ApprovalPageModel): string {
   if (!model.demoMode) return '';
   return `<p class="banner" role="note">Demo: auto-approval by demo-operator is labelled in the audit log</p>`;
 }
 
-/** 页标题、意图和当前状态。 */
+/** Page title, intent, and current status. */
 function heading(model: ApprovalPageModel): string {
   return `<h1>Approve exact terms</h1>
 <p>Intent: ${escapeHtml(model.intent)}</p>
@@ -57,7 +57,7 @@ function heading(model: ApprovalPageModel): string {
 <p id="request-status">Status: ${escapeHtml(statusText(model.status))} (${escapeHtml(model.status)})</p>`;
 }
 
-/** 把状态码换成页面上的短标签。 */
+/** Map status codes to short display labels. */
 function statusText(status: ApprovalStatus): string {
   switch (status) {
     case 'requested':
@@ -79,7 +79,7 @@ function statusText(status: ApprovalStatus): string {
   }
 }
 
-/** 被选中的条款放在最显眼的位置，哈希用等宽字体展示。 */
+/** Highlight the chosen terms and display the hash in monospace. */
 function chosenSection(model: ApprovalPageModel): string {
   const chosen = model.chosen;
   const category = merchantCategoryText(model);
@@ -104,7 +104,7 @@ function chosenSection(model: ApprovalPageModel): string {
 </section>`;
 }
 
-/** 已有商户类别就原样展示；缺了且需要人填写时，明确写成待填。 */
+/** Show the existing merchant category or mark it as required. */
 function merchantCategoryText(model: ApprovalPageModel): string {
   const code = model.chosen.merchantCategoryCode;
   if (code !== undefined) return code;
@@ -112,7 +112,7 @@ function merchantCategoryText(model: ApprovalPageModel): string {
   return 'Not set';
 }
 
-/** 把账期代码写成可读标签，并保留原始代码。 */
+/** Show readable billing intervals alongside their original codes. */
 function intervalText(interval: string): string {
   switch (interval) {
     case 'MONTHLY':
@@ -126,7 +126,7 @@ function intervalText(interval: string): string {
   }
 }
 
-/** SINGLE / MULTIPLE 对应单次或多次扣款。 */
+/** SINGLE and MULTIPLE indicate one or multiple charges. */
 function chargeText(count: string): string {
   switch (count) {
     case 'SINGLE':
@@ -138,14 +138,14 @@ function chargeText(count: string): string {
   }
 }
 
-/** 承诺期用月数表达。0 表示没有最低承诺期。 */
+/** Express commitments in months; zero means no minimum term. */
 function commitmentText(months: number): string {
   if (months === 0) return 'No commitment (0 months)';
   if (months === 1) return '1 month';
   return `${months} months`;
 }
 
-/** 决策原因用芯片列出。已知代码换成固定文案，其余原样转义。 */
+/** List decision reasons as chips; escape unknown codes. */
 function reasonSection(model: ApprovalPageModel): string {
   const items = model.reasons.length === 0
     ? '<p>No reason codes.</p>'
@@ -153,7 +153,7 @@ function reasonSection(model: ApprovalPageModel): string {
   return `<section aria-labelledby="reasons"><h2 id="reasons">Reasons</h2>${items}</section>`;
 }
 
-/** 把原因代码映射成审批页上的固定说法。 */
+/** Map known reason codes to fixed approval-page labels. */
 function reasonText(code: string): string {
   switch (code) {
     case 'price_unverified':
@@ -167,7 +167,7 @@ function reasonText(code: string): string {
   }
 }
 
-/** 比较表。x402 行单独标明不能用卡支付。 */
+/** Comparison table; mark x402 offers as not payable by card. */
 function comparisonSection(model: ApprovalPageModel): string {
   if (model.comparison.length === 0) {
     return `<section aria-labelledby="comparison"><h2 id="comparison">Comparison</h2><p>No offers in the comparison.</p></section>`;
@@ -191,7 +191,7 @@ function comparisonSection(model: ApprovalPageModel): string {
 </table></div></section>`;
 }
 
-/** 渲染比较表的一行。 */
+/** Render one comparison row. */
 function comparisonRow(row: ApprovalComparisonRow): string {
   const x402 = row.rail === 'x402';
   const rail = x402
@@ -210,13 +210,13 @@ function comparisonRow(row: ApprovalComparisonRow): string {
 </tr>`;
 }
 
-/** 备注逐条转义后放进列表。 */
+/** Escape each note before adding it to the list. */
 function notesCell(notes: readonly string[]): string {
   if (notes.length === 0) return '\u2014';
   return `<ul>${notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('')}</ul>`;
 }
 
-/** 通过与失败的规则代码。x402 不能用卡支付，结果列不再写成 Passed。 */
+/** Show rule results; x402 offers always say Not payable by card. */
 function resultCell(row: ApprovalComparisonRow): string {
   if (row.rail === 'x402') return 'Not payable by card';
   if (row.passed) return 'Passed';
@@ -224,7 +224,7 @@ function resultCell(row: ApprovalComparisonRow): string {
   return `Failed: ${row.failedCodes.map((code) => escapeHtml(code)).join(', ')}`;
 }
 
-/** 被排除的报价。region_unavailable 要写出地区原因。 */
+/** List excluded offers with an explanation for region_unavailable. */
 function excludedSection(model: ApprovalPageModel): string {
   if (model.excluded.length === 0) return '';
   const rows = model.excluded.map((item) => `<tr>
@@ -244,7 +244,7 @@ function excludedSection(model: ApprovalPageModel): string {
 </table></div></section>`;
 }
 
-/** 已知排除原因附上说明，未知原因只标成已排除。 */
+/** Explain known exclusions and mark unknown reasons as excluded. */
 function exclusionText(reason: string): string {
   if (reason === 'region_unavailable') {
     return 'Unavailable in the billing or card region, so this offer was excluded from comparison.';
@@ -252,7 +252,7 @@ function exclusionText(reason: string): string {
   return 'Excluded from comparison.';
 }
 
-/** 已经有卡时展示掩码信息。没有卡就不渲染这一节。 */
+/** Show masked card details only when a card exists. */
 function cardSection(model: ApprovalPageModel): string {
   const card = model.card;
   if (card === undefined) return '';
@@ -265,19 +265,19 @@ function cardSection(model: ApprovalPageModel): string {
   return `<section aria-labelledby="issued-card"><h2 id="issued-card">Card</h2>${body}</section>`;
 }
 
-/** 可选字段缺省时不输出空行。值在这里转义。 */
+/** Omit absent optional fields and escape present values. */
 function pair(term: string, value: string | undefined): string {
   if (value === undefined) return '';
   return `<dt>${escapeHtml(term)}</dt><dd>${escapeHtml(value)}</dd>`;
 }
 
-/** 把绑定进哈希的 rail 原样展示。x402 同时标明不能用卡支付。 */
+/** Show the rail bound into the hash and flag x402 as not payable by card. */
 function railText(rail: PaymentRail): string {
   if (rail === 'x402') return 'x402 (not payable by card)';
   return rail;
 }
 
-/** 批准与拒绝是两个独立表单，避免一次提交带上另一边的字段。非 requested 时禁用整个 fieldset。 */
+/** Keep approve and reject fields in separate forms; disable them unless requested. */
 function decisionSection(model: ApprovalPageModel, options: ApprovalRenderOptions): string {
   const locked = model.status === 'requested' ? '' : ' disabled';
   const reject = `<form class="reject-form" method="post" action="${escapeHtml(segmentPath(['approvals', model.approvalRequestId, 'reject']))}" autocomplete="off">
@@ -314,7 +314,7 @@ ${reject}
 </section>`;
 }
 
-/** 按钮旁边再重复一遍将被提交的条款，避免人只看见金额。 */
+/** Repeat the submitted terms next to the button. */
 function decisionSummary(model: ApprovalPageModel): string {
   const chosen: ApprovalChosenTerms = model.chosen;
   const category = model.chosen.merchantCategoryCode !== undefined
@@ -325,7 +325,7 @@ function decisionSummary(model: ApprovalPageModel): string {
   return `Rail ${chosen.rail}, amount ${chosen.amount} ${chosen.currency}, ${intervalText(chosen.interval)}, ${chargeText(chosen.allowedTransactionCount)}, ${category}, commitment ${commitmentText(chosen.commitmentMonths)}.`;
 }
 
-/** needsMcc 为真才输出商户类别输入框。代码由审批人填写。 */
+/** Render the operator-supplied merchant category input only when needsMcc is true. */
 function mccField(model: ApprovalPageModel): string {
   if (!model.needsMcc) return '';
   return `<label for="merchant-category-code">Merchant category code</label>

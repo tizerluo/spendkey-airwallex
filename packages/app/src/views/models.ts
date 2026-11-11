@@ -1,6 +1,6 @@
-// 审批页、审计页、列表页的视图模型。渲染函数只读这些字段，不访问账本或网络。
+// View models for approval, audit, and index pages; renderers never access the ledger or network.
 
-/** 审批请求在控制台里的生命周期。 */
+/** Approval lifecycle in the console. */
 export type ApprovalStatus =
   | 'requested'
   | 'approved'
@@ -10,32 +10,25 @@ export type ApprovalStatus =
   | 'rejected'
   | 'expired';
 
-/**
- * 报价价格是否经过核对。与 @sk/policy ApprovalRequest 和账本 offers_snapshot 一致。
- * 未核对的价格不能当成已节省的金额。
- */
+/** Price verification status shared with policy requests and offer snapshots.
+ * Unverified prices cannot support savings claims. */
 export type PriceStatus = 'verified' | 'price_unverified';
 
-/** 与 ApprovalRequest.interval、账本 approval_requested.interval 相同。 */
+/** Same interval codes as policy requests and approval_requested events. */
 export type ChargeInterval = 'PER_TRANSACTION' | 'MONTHLY' | 'ALL_TIME';
 
-/** 与 ApprovalRequest.allowedTransactionCount、账本 approval_requested 相同。 */
+/** Same transaction-count codes as policy requests and approval_requested events. */
 export type AllowedTransactionCount = 'SINGLE' | 'MULTIPLE';
 
-/** 与 ApprovalRequest.rail 相同。不是 card 的条款不能在页面上批准。 */
+/** Same rail as policy requests; only card terms can be approved here. */
 export type PaymentRail = 'card' | 'x402';
 
-/**
- * 最近一条 run_started.mode。
- * offline_emulator 的页面不能出现 sandbox 字样。
- * 账本里还没有该事件时，模型省略这个字段，页面写 mode unknown。
- */
+/** Latest run_started mode. Offline pages never say sandbox.
+ * Omit when unavailable so the page says mode unknown. */
 export type ConsoleRunMode = 'offline_emulator' | 'sandbox' | 'console_sandbox';
 
-/**
- * 当前准备让人批准的那一条条款。
- * amount 已是展示用字符串，由 buildApprovalPageModel 用金额工具格式化。
- */
+/** Terms currently presented for human approval.
+ * The builder formats amount for display. */
 export interface ApprovalChosenTerms {
   offerId: string;
   vendor: string;
@@ -51,7 +44,7 @@ export interface ApprovalChosenTerms {
   rail: PaymentRail;
 }
 
-/** 比较表的一行。rail 为 x402 时必须标明不能用卡支付。 */
+/** Comparison row; x402 must be marked as not payable by card. */
 export interface ApprovalComparisonRow {
   offerId: string;
   vendor: string;
@@ -65,23 +58,20 @@ export interface ApprovalComparisonRow {
   failedCodes: string[];
 }
 
-/** 比较之前就被排除的报价，例如地区不可用。 */
+/** Offer excluded before comparison, for example because of region availability. */
 export interface ApprovalExclusion {
   offerId: string;
   reason: string;
 }
 
-/** 已发行卡片的可展示字段。调用方只能传入掩码卡号。 */
+/** Displayable card fields; callers must supply masked numbers only. */
 export interface ApprovalCardSummary {
   cardId?: string;
   maskedNumber?: string;
   status?: string;
 }
 
-/**
- * 审批页模型。
- * nonceHint 只是操作说明，例如终端里打印了 nonce；真正的 nonce 不进这个模型。
- */
+/** Approval page model. nonceHint contains instructions only; never the actual nonce. */
 export interface ApprovalPageModel {
   approvalRequestId: string;
   status: ApprovalStatus;
@@ -95,17 +85,17 @@ export interface ApprovalPageModel {
   needsMcc: boolean;
   nonceHint: string;
   demoMode: boolean;
-  /** 最近一条 run_started 的模式。没有该事件时省略。 */
+  /** Latest run_started mode; omit when unavailable. */
   runMode?: ConsoleRunMode;
   card?: ApprovalCardSummary;
 }
 
-/** renderApprovalPage 的第二个参数。csrfToken 写入隐藏域 csrf。 */
+/** Render options; csrfToken populates the hidden csrf field. */
 export interface ApprovalRenderOptions {
   csrfToken: string;
 }
 
-/** 审计表里一条账本事件的展示行。 */
+/** Display row for one ledger event. */
 export interface AuditEventRow {
   seq: number;
   at: string;
@@ -113,11 +103,11 @@ export interface AuditEventRow {
   summary: string;
   source?: 'simulated' | 'observed';
   hashShort: string;
-  /** 为真时整句摘要用警告样式。控制项回读不一致时使用。 */
+  /** Apply warning styling to the full summary, including control mismatches. */
   warning?: boolean;
 }
 
-/** 审计页上的卡片摘要。limit 已是展示用字符串。 */
+/** Audit card summary with an already formatted limit. */
 export interface AuditCardSummary {
   cardId: string;
   status: string;
@@ -125,19 +115,19 @@ export interface AuditCardSummary {
   currency: string;
 }
 
-/** 审计页模型。chainValid 为 false 时徽章必须写 Chain BROKEN。 */
+/** Audit model; a false chainValid must display Chain BROKEN. */
 export interface AuditPageModel {
   chainValid: boolean;
   verifyError?: string;
   events: AuditEventRow[];
   cards: AuditCardSummary[];
-  /** 最近一条 run_started 的模式。没有该事件时省略，页面写 mode unknown。 */
+  /** Latest run_started mode; omit when unavailable to display mode unknown. */
   runMode?: ConsoleRunMode;
-  /** 同一条 run_started 的政策说明。空则省略，页面不编造。 */
+  /** Policy notes from the same run_started; omit if absent. */
   policyNotes?: readonly string[];
 }
 
-/** 首页列表中的一条审批。 */
+/** One approval in the index list. */
 export interface IndexApprovalRow {
   id: string;
   status: string;
@@ -146,9 +136,9 @@ export interface IndexApprovalRow {
   currency: string;
 }
 
-/** 首页模型。 */
+/** Index page model. */
 export interface IndexPageModel {
   approvals: IndexApprovalRow[];
-  /** 调用方把账本传入构建器时，取最近一条 run_started。 */
+  /** Latest run_started when the caller supplies ledger events. */
   runMode?: ConsoleRunMode;
 }

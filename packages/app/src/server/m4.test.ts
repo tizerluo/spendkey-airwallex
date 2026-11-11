@@ -65,6 +65,51 @@ describe('M4 policy decision binding', () => {
     const service = new ApprovalService({ ...f.service.options, ledger });
     await expect(service.submit(f.request)).rejects.toMatchObject({ code: 'decision_not_found' });
   });
+  it('refuses a three-hour-old decision replay with a forged fresh expiry', async () => {
+    const f = fixture(false);
+    const request = { ...f.request, createdAt: '2026-11-11T07:00:00.000Z', expiresAt: '2026-11-11T10:10:00.000Z' };
+    recordDecision(f.ledger, request);
+    await expect(f.service.submit(request)).rejects.toMatchObject({ code: 'decision_not_found' });
+    expect(f.store.list()).toEqual([]); expect(f.fake.createCalls).toBe(0);
+  });
+  it('refuses a lifetime longer than fifteen minutes even for a fresh decision', async () => {
+    const f = fixture();
+    await expect(f.service.submit({ ...f.request, expiresAt: '2026-11-11T10:15:00.001Z' }))
+      .rejects.toMatchObject({ code: 'decision_not_found' });
+    expect(f.store.list()).toEqual([]);
+  });
+  it('keeps same-id retries idempotent but refuses another request for a consumed decision after restart', async () => {
+    const f = fixture(); await f.submit();
+    expect(f.store.get(f.request.approvalRequestId)).toMatchObject({ decisionSeq: 2 });
+    await expect(f.submit()).resolves.toEqual({ id: f.request.approvalRequestId });
+    const first = f.service.get(f.request.approvalRequestId);
+    f.service.reject(f.request.approvalRequestId, first.csrf);
+    const restarted = new ApprovalService(f.service.options);
+    await expect(restarted.submit({ ...f.request, approvalRequestId: 'request_test_second' }))
+      .rejects.toMatchObject({ code: 'decision_already_requested' });
+    expect(f.store.list()).toHaveLength(1); expect(f.fake.createCalls).toBe(0);
+    expect(f.events().filter(event => event.kind === 'approval_requested')).toHaveLength(1);
+  });
+  it.each([at, '2026-11-11T09:59:00.000Z'])('reserves decisions consumed by legacy records created at %s without decisionSeq', async createdAt => {
+    const f = fixture(); await f.submit();
+    const legacy = f.service.get(f.request.approvalRequestId); delete legacy.decisionSeq; legacy.request.createdAt = createdAt; f.store.save(legacy);
+    const restarted = new ApprovalService(f.service.options);
+    await expect(restarted.submit({ ...f.request, approvalRequestId: 'request_test_legacy_duplicate' }))
+      .rejects.toMatchObject({ code: 'decision_already_requested' });
+  });
+  it('keeps saved retries on their original sequence when a later decision shares the same instant', async () => {
+    const f = fixture(); await f.submit(); recordDecision(f.ledger, f.request);
+    await expect(f.submit()).resolves.toEqual({ id: f.request.approvalRequestId });
+    expect(f.service.get(f.request.approvalRequestId).decisionSeq).toBe(2);
+    await expect(f.service.submit({ ...f.request, approvalRequestId: 'request_test_fresh_decision' }))
+      .resolves.toEqual({ id: 'request_test_fresh_decision' });
+    expect(f.service.get('request_test_fresh_decision').decisionSeq).toBe(6);
+  });
+  it('matches equivalent timestamp encodings for the decision instant', async () => {
+    const f = fixture();
+    await expect(f.service.submit({ ...f.request, createdAt: '2026-11-11T11:00:00.000+01:00' }))
+      .resolves.toEqual({ id: f.request.approvalRequestId });
+  });
   it('does not pair a decision with a later or legacy comparison', async () => {
     const f = fixture(false);
     f.ledger.append({ kind: 'decision', action: 'ask', chosenOfferId: f.request.offerId, reasons: [], ruleResults: [] }, at);
@@ -115,6 +160,7 @@ describe('M4 issuance controls, activation, and crash ordering', () => {
     expect(f.events()).toContainEqual({ kind: 'card_frozen', cardId: 'card_test_1', by: 'system', reason: 'auto-freeze: controls mismatch' });
     expect(f.service.get(f.request.approvalRequestId)).toMatchObject({ status: 'failed', card: { status: 'INACTIVE' } });
     expect(f.events().some(event => event.kind === 'card_issued')).toBe(false);
+    expect(f.events()).toContainEqual(expect.objectContaining({ kind: 'card_issue_unconfirmed', reason: 'controls_mismatch' }));
   });
   it('polls activation using 0.5/1/2/4 second back-off', async () => {
     const f = fixture(); await f.submit(); const get = f.client.getCard.bind(f.client); let calls = 0;
@@ -282,12 +328,20 @@ describe('M4 demo cleanup, signal handlers, store locks and preflight', () => {
     const host = Object.assign(new EventEmitter(), { exit: vi.fn() }); const close = vi.fn(); const log = vi.fn();
     const uninstall = installDemoSignalHandlers(f.service, log, host, close);
     host.emit(signal);
-    expect(host.listenerCount(signal)).toBe(1); // Repeated signals must not restore Node's default immediate exit.
-    host.emit(signal);
+    expect(host.listenerCount(signal)).toBe(1);
     await vi.waitFor(() => expect(host.exit).toHaveBeenCalledWith(1));
     expect(f.fake.cards.get('card_test_1')?.card_status).toBe('INACTIVE'); expect(close).toHaveBeenCalledOnce();
     expect(f.events().at(-1)).toMatchObject({ kind: 'card_frozen', by: 'human', reason: 'demo-operator: cleanup' });
     uninstall(); expect(host.listenerCount('SIGINT')).toBe(0); expect(host.listenerCount('SIGTERM')).toBe(0);
+  });
+  it('exits immediately on a second signal when issuance is stuck', () => {
+    const f = fixture();
+    vi.spyOn(f.service, 'waitForIssuance').mockReturnValue(new Promise<void>(() => {}));
+    const host = Object.assign(new EventEmitter(), { exit: vi.fn() }); const close = vi.fn();
+    const uninstall = installDemoSignalHandlers(f.service, () => {}, host, close);
+    host.emit('SIGINT'); expect(host.exit).not.toHaveBeenCalled();
+    host.emit('SIGTERM'); expect(host.exit).toHaveBeenCalledExactlyOnceWith(1);
+    expect(close).not.toHaveBeenCalled(); uninstall();
   });
   it('waits for in-flight issuance before signal cleanup closes stores and exits', async () => {
     const f = fixture(); await f.submit(); const create = f.client.createCard.bind(f.client);
@@ -298,6 +352,7 @@ describe('M4 demo cleanup, signal handlers, store locks and preflight', () => {
     const uninstall = installDemoSignalHandlers(f.service, () => {}, host, close);
     const issuing = f.grant();
     await vi.waitFor(() => expect(f.fake.createCalls).toBe(1));
+    expect(f.service.get(f.request.approvalRequestId).card).toBeUndefined();
     host.emit('SIGINT'); expect(close).not.toHaveBeenCalled(); expect(host.exit).not.toHaveBeenCalled();
     release(); await issuing;
     await vi.waitFor(() => expect(host.exit).toHaveBeenCalledWith(1));

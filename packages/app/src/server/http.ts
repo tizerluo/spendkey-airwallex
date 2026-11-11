@@ -53,7 +53,7 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
       }
       if (method === 'GET' && path === '/') {
         const records = store.list().map(item => service.get(item.request.approvalRequestId));
-        respond(response, 200, renderIndexPage(buildIndexPageModel(records)), true); return;
+        respond(response, 200, renderIndexPage(buildIndexPageModel(records, ledger.read())), true); return;
       }
       const approvalRoute = /^\/approvals\/([a-zA-Z0-9_-]+)(?:\/(approve|reject))?$/.exec(path);
       if (method === 'GET' && approvalRoute && !approvalRoute[2]) {

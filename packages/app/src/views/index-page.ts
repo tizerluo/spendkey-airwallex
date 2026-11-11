@@ -1,9 +1,9 @@
-// 审批列表。每一行链到对应的审批页，审计页从页头进入。
+// Approval list with links to each request and audit navigation in the header.
 
 import { consoleBody, escapeHtml, renderDocument, runModeBlock, segmentPath } from './html.js';
 import type { IndexPageModel } from './models.js';
 
-/** 渲染审批列表页。没有请求时给出空状态，而不是一张空表。 */
+/** Render the approval list, or an empty state when no requests exist. */
 export function renderIndexPage(model: IndexPageModel): string {
   const body = model.approvals.length === 0
     ? '<p>No approval requests.</p>'
@@ -15,7 +15,7 @@ ${body}`;
   return renderDocument('Approvals', consoleBody(main, 'approvals', model.runMode));
 }
 
-/** 列表保持调用方给出的顺序。 */
+/** Preserve caller order. */
 function approvalTable(model: IndexPageModel): string {
   const rows = model.approvals.map((row) => `<tr>
 <th scope="row"><a href="${escapeHtml(segmentPath(['approvals', row.id]))}">${escapeHtml(row.id)}</a></th>

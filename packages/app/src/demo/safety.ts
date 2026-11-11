@@ -42,7 +42,7 @@ export function installDemoSignalHandlers(service: ApprovalService, log: (line: 
   host: SignalHost = process, close: () => void = () => {}): () => void {
   let stopping = false;
   const stop = () => {
-    if (stopping) return;
+    if (stopping) { host.exit(1); return; }
     stopping = true;
     void service.waitForIssuance().then(() => cleanupDemoCards(service, log)).catch(() => {}).finally(() => { try { close(); } finally { host.exit(1); } });
   };

@@ -6,6 +6,8 @@ import type { ApprovalCardSummary, ApprovalStatus } from '../views/models.js';
 
 export interface ApprovalRecord {
   request: ApprovalRequest;
+  /** Absent only in stores written before decision consumption was tracked. */
+  decisionSeq?: number;
   status: ApprovalStatus;
   nonceHash: string;
   csrf: string;
@@ -16,6 +18,7 @@ export interface ApprovalRecord {
 }
 const savedRecordSchema = z.object({
   request: approvalRequestSchema,
+  decisionSeq: z.number().int().nonnegative().safe().optional(),
   status: z.enum(['requested', 'approved', 'issuing', 'issued', 'failed', 'rejected', 'expired']),
   nonceHash: z.union([z.literal(''), z.string().regex(/^[0-9a-f]{64}$/)]),
   csrf: z.string().regex(/^[0-9a-f]{48}$/),

@@ -60,8 +60,6 @@ export class ApprovalService {
     if (Date.parse(request.createdAt) > this.now().getTime() || Date.parse(request.expiresAt) <= this.now().getTime()) {
       throw new ServiceError('approval_expired');
     }
-    if (Date.parse(request.expiresAt) - this.now().getTime() > 60 * 60_000) throw new ServiceError('approval_lifetime_exceeded');
-    this.#bindDecision(request);
     const existing = this.options.store.get(request.approvalRequestId);
     if (existing) {
       if (termsHash(existing.request) !== termsHash(request) || canonicalize(existing.request) !== canonicalize(request)) {
@@ -69,10 +67,18 @@ export class ApprovalService {
       }
       return { id: request.approvalRequestId };
     }
+    const decisionSeq = this.#bindDecision(request);
+    if (this.options.store.list().some(record => record.decisionSeq === decisionSeq
+      // Legacy stores lack a sequence; conservatively reserve matching decisions in their original window.
+      || (record.decisionSeq === undefined && record.request.offerId === request.offerId
+        && Date.parse(record.request.createdAt) <= Date.parse(request.createdAt)
+        && Date.parse(request.createdAt) < Date.parse(record.request.expiresAt)))) {
+      throw new ServiceError('decision_already_requested', 409);
+    }
     const open = this.options.store.list().filter(record => this.get(record.request.approvalRequestId).status === 'requested');
     if (open.length >= 20) throw new ServiceError('too_many_open_requests', 429);
     const nonce = randomBytes(24).toString('hex');
-    const record: ApprovalRecord = { request, status: 'requested', nonceHash: digest(nonce), csrf: randomBytes(24).toString('hex') };
+    const record: ApprovalRecord = { request, decisionSeq, status: 'requested', nonceHash: digest(nonce), csrf: randomBytes(24).toString('hex') };
     this.options.store.save(record);
     this.options.ledger.append({ kind: 'approval_requested', approvalRequestId: request.approvalRequestId,
       offerId: request.offerId, presentedTermsHash: termsHash(request), amountMinor: request.amountMinor,
@@ -83,14 +89,15 @@ export class ApprovalService {
     (this.options.printNonce ?? console.log)(`APPROVAL NONCE ${request.approvalRequestId}: ${nonce}`);
     return { id: request.approvalRequestId };
   }
-  #bindDecision(request: ApprovalRequest): void {
+  #bindDecision(request: ApprovalRequest): number {
     const events = this.options.ledger.read();
     const decisionIndex = events.map((row, index) => ({ ...row, index })).reverse().find(({ event, at }) => event.kind === 'decision'
       && event.action === 'ask' && event.chosenOfferId === request.offerId
-      && Date.parse(at) >= Date.parse(request.createdAt) && Date.parse(at) < Date.parse(request.expiresAt)
-      && Date.parse(at) <= this.now().getTime())?.index ?? -1;
+      && Date.parse(at) === Date.parse(request.createdAt)
+      && Date.parse(request.expiresAt) - Date.parse(request.createdAt) <= 15 * 60_000
+      && this.now().getTime() - Date.parse(at) <= 15 * 60_000)?.index ?? -1;
     if (decisionIndex < 0) throw new ServiceError('decision_not_found', 409);
-    // Use the comparison and snapshot immediately preceding this decision, never a later unrelated row.
+    // Ledger sequence defines evidence order; timestamps only bind lifetime and freshness.
     const prior = events.slice(0, decisionIndex).reverse();
     const comparison = prior.find(({ event }) => event.kind === 'comparison');
     const snapshot = prior.find(({ event }) => event.kind === 'offers_snapshot');
@@ -104,6 +111,7 @@ export class ApprovalService {
       || candidate.terms.merchantCategoryCode !== request.merchantCategoryCode) {
       throw new ServiceError('terms_not_from_decision', 409);
     }
+    return events[decisionIndex]!.seq;
   }
   /** Record redacted provider metadata at the failing operation boundary. */
   providerFailure(error: unknown, endpoint: string, step: string): never {
@@ -256,7 +264,8 @@ export class ApprovalService {
       record.status = 'failed'; this.options.store.save(record);
       if (!this.options.ledger.read().some(({ event }) => event.kind === 'card_issue_unconfirmed' && event.approvalId === approval.approvalId)) {
         this.options.ledger.append({ kind: 'card_issue_unconfirmed',
-          approvalId: approval.approvalId, requestId: input.request_id, reason: 'issuance_or_activation_unconfirmed',
+          approvalId: approval.approvalId, requestId: input.request_id, reason: error instanceof ServiceError && error.code === 'controls_mismatch'
+            ? 'controls_mismatch' : 'issuance_or_activation_unconfirmed',
         }, this.now().toISOString());
       }
       if (error instanceof ServiceError) throw error;

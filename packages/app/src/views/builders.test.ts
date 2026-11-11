@@ -1,4 +1,4 @@
-// 页面模型构建测试。账本记录是普通对象，不打开文件，也不访问网络。
+// Offline model tests use plain ledger records without files or network access.
 
 import type { CardAuditEvent } from '@sk/ledger';
 import { termsHash, type ApprovalRequest } from '@sk/policy';
@@ -580,7 +580,7 @@ describe('buildAuditPageModel', () => {
   });
 });
 
-/** 取出包含某段文本的那一行，用来确认警告样式没有套到匹配行上。 */
+/** Find the row containing text to check that only mismatches receive warning styling. */
 function rowAround(html: string, needle: string): string {
   const at = html.indexOf(needle);
   const start = html.lastIndexOf('<tr', at);
