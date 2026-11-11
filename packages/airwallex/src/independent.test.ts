@@ -1324,9 +1324,9 @@ describe('independent: safety regressions', () => {
     expectNoMarker(error, 'independent-token-01');
   });
 
-  it('blocks a details path nested beyond five encoding layers', () => {
+  it.each([6, 15, 16, 17, 64])('blocks a details path nested through %i encoding layers', depth => {
     let encoded = '/details';
-    for (let depth = 0; depth < 6; depth += 1) encoded = encodeURIComponent(encoded);
+    for (let layer = 0; layer < depth; layer += 1) encoded = encodeURIComponent(encoded);
     expect(() => assertSafeCardPath(`/api/v1/issuing/cards/card_test_01${encoded}`)).toThrow(
       AirwallexSafetyError,
     );
@@ -1355,6 +1355,7 @@ describe('independent: safety regressions', () => {
   it.each(['', '   ', '\t\r\n', '\u00a0'])('rejects a blank webhook secret %j', secret => {
     const timestamp = String(WEBHOOK_NOW);
     const signature = createHmac('sha256', secret).update(timestamp).update(webhookBody).digest('hex');
+    expect(() => verifyWebhook({ signature, secret })).not.toThrow();
     expect(verifyWebhook({ signature, secret })).toBe(false);
   });
 
