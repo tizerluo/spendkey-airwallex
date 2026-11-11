@@ -12,12 +12,16 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test": "pnpm --filter @sk/ledger build && pnpm --filter @sk/policy build && vitest run",
+    "test": "pnpm --filter @sk/agent... build && vitest run",
     "typecheck": "pnpm --filter @sk/ledger build && pnpm --filter @sk/policy build && tsc --noEmit",
     "lint": "eslint ."
   },
   "dependencies": {
     "@sk/ledger": "workspace:*",
-    "@sk/policy": "workspace:*"
+    "@sk/policy": "workspace:*",
+    "@sk/airwallex": "workspace:*",
+    "@sk/agent": "workspace:*",
+    "@sk/offers": "workspace:*",
+    "zod": "3.25.76"
   }
 }

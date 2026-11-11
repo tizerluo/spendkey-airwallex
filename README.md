@@ -19,19 +19,28 @@ Out of scope: real charges, storing card numbers, auto-filling checkouts, loggin
 
 ## Status
 
-Milestones M1 (foundation) and M2 (decision) are done. M3 has started with the console views. Everything runs offline; no live Airwallex calls yet.
+The M3 approval service, agent, transaction loop, and offline demo are implemented. The console reuses the approval, audit, and index views. All verification is offline; live Airwallex sandbox behavior remains unverified.
 
-| Package | What it is |
-|---|---|
-| `packages/schema` | Shared zod schemas (decision, audit record, approval) from the Spendkey baseline. |
-| `packages/core` | Spendkey decision layer: hard rules, budget windows, decision-provider chain with rules-only fallback, hash-chained audit log. |
-| `packages/airwallex` | Typed Airwallex sandbox client: auth with token refresh, balances, cardholders, virtual cards with authorization controls, freeze, limits, transactions, sandbox authorization simulation, webhook signature verification. Card PAN/CVV endpoints are blocked by design. |
-| `packages/offers` | Offer sources for a purchase intent: a curated list and a read-only x402 snapshot. Fixture prices are synthetic unless marked verified. Each offer has a payment rail (`card` or `x402`). |
-| `packages/compare` | Turns offers into comparable candidates: upfront cash, largest single charge, cost over a horizon (a range when usage is uncertain). Integer money math; no unit conversion. |
-| `packages/policy` | Four hard rules (cash reserve floor, window budget, commitment cap, region), a decision step where the agent can at most ask, human approval bound by a terms hash, and the mapping from an approval to Airwallex card controls (same currency, merchant category, limit, deterministic `request_id`). x402 offers are shown for comparison but never get a card. |
-| `packages/app` | Server-rendered console views (`@sk/app`): approval page, audit page, and the approval index. HTML strings only; the HTTP server is not in this package yet. |
+The card path uses `@sk/offers` → `@sk/compare` → `@sk/policy` → `@sk/agent`, with `@sk/app` owning approval and issuing. `@sk/ledger` connects the steps with a hash chain. The existing `@sr/core` and `@sr/schema` baseline is unchanged.
 
-M3 console views are in. Still ahead: the card audit ledger, transaction/webhook loop, the HTTP server that serves these views, and the end-to-end sandbox demo (M4).
+## Run the demo and console
+
+Use Node 22 and pnpm 10:
+
+```bash
+pnpm install
+pnpm demo:offline
+```
+
+The offline demo injects a synthetic Airwallex fetch, requires no credentials, and writes `demo-output/ledger.jsonl`. It shows the DesignCo annual reserve refusal, monthly demo approval, card controls, declines, freeze, reconciliation, chain verification, and tamper detection. Auto-approval is explicitly labelled `demo-operator` / `demoAutoApproved`.
+
+For the local sandbox console, set `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_API_KEY`, and an existing `AIRWALLEX_CARDHOLDER_ID` in the runtime environment, then run `pnpm console`. Open <http://127.0.0.1:8787>; approve the seeded DesignCo request using the nonce printed in the operator terminal. State lives in the gitignored `console-data/` directory. The nonce is never sent over HTTP or written to the ledger. Optional `AIRWALLEX_WEBHOOK_SECRET` enables the signed webhook endpoint; polling is the primary reconciliation path.
+
+`pnpm demo:sandbox` runs the same demo against the real Airwallex sandbox with those runtime variables. It refuses missing credentials, needs sufficient USD sandbox funds, and freezes the demo card before finishing. It has **not** been run as part of this task. Sandbox state is durable in `demo-output/sandbox/`. Both demo commands build first.
+
+The DesignCo main line works with the current ledger. Sub-cent unit-price snapshots (including the default x402 source) still require an upstream ledger validation fix.
+
+The console's card mutation routes require the approval page's CSRF value: `POST /cards/:id/simulate` (`amount`, `currency`, `mcc`, `csrf`), `POST /cards/:id/freeze` (`csrf`), and `POST /reconcile` (`cardId`, `csrf`, optional `from`/`to`). Audit exports are available at `/audit` and `/audit.jsonl`.
 
 ## Development
 
@@ -42,7 +51,7 @@ pnpm install
 pnpm verify   # secret scan + typecheck + lint + all tests (offline)
 ```
 
-Live sandbox runs (later milestones) read `AIRWALLEX_CLIENT_ID` and `AIRWALLEX_API_KEY` from the environment and only talk to `https://api-demo.airwallex.com`. Never commit credentials.
+Live sandbox runs read `AIRWALLEX_CLIENT_ID` and `AIRWALLEX_API_KEY` from the environment and only talk to `https://api-demo.airwallex.com`. Never commit credentials.
 
 ## License
 

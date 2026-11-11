@@ -30,6 +30,21 @@ importers:
         specifier: 3.2.4
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.1)(jsdom@30.1.2(@noble/hashes@1.8.0))(lightningcss@1.33.0)
 
+  packages/agent:
+    dependencies:
+      '@sk/compare':
+        specifier: workspace:*
+        version: link:../compare
+      '@sk/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@sk/offers':
+        specifier: workspace:*
+        version: link:../offers
+      '@sk/policy':
+        specifier: workspace:*
+        version: link:../policy
+
   packages/airwallex:
     dependencies:
       zod:
@@ -38,12 +53,24 @@ importers:
 
   packages/app:
     dependencies:
+      '@sk/agent':
+        specifier: workspace:*
+        version: link:../agent
+      '@sk/airwallex':
+        specifier: workspace:*
+        version: link:../airwallex
       '@sk/ledger':
         specifier: workspace:*
         version: link:../ledger
+      '@sk/offers':
+        specifier: workspace:*
+        version: link:../offers
       '@sk/policy':
         specifier: workspace:*
         version: link:../policy
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
   packages/compare:
     dependencies:
