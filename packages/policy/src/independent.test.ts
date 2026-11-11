@@ -814,7 +814,7 @@ describe('independent: human approval gates', () => {
 describe('independent: approval-to-card controls', () => {
   it('derives a deterministic, bounded request_id from the approval id only', () => {
     const first = approved();
-    const expected = `sk-${createHash('sha256')
+    const expected = `spk_${createHash('sha256')
       .update(first.approvalId)
       .digest('hex')
       .slice(0, 40)}`;
@@ -822,10 +822,10 @@ describe('independent: approval-to-card controls', () => {
 
     expect(body.request_id).toBe(expected);
     expect(body.request_id).toBe(cardRequestIdFromApproval(first.approvalId));
-    expect(body.request_id).toMatch(/^sk-[0-9a-f]{40}$/);
+    expect(body.request_id).toMatch(/^spk_[0-9a-f]{40}$/);
     expect(body.request_id.length).toBeLessThanOrEqual(50);
     expect(approvalToCardInput(first, CARD_OPTIONS).request_id).toBe(body.request_id);
-    expect(cardRequestIdFromApproval('x'.repeat(1000))).toHaveLength(43);
+    expect(cardRequestIdFromApproval('x'.repeat(1000))).toHaveLength(44);
 
     const relabelled: Approval = {
       ...first,

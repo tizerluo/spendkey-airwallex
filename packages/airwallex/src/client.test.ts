@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import {
   AirwallexApiError, AirwallexClient, AirwallexResponseError, AirwallexSafetyError,
@@ -152,9 +153,22 @@ describe('issuing methods', () => {
     const approvalId = 'approval_test_01'.repeat(20);
     const requestId = cardRequestIdFromApproval(approvalId);
     expect(cardRequestIdFromApproval(approvalId)).toBe(requestId);
-    expect(requestId).toMatch(/^sk-[a-f0-9]{40}$/);
+    expect(requestId).toMatch(/^spk_[a-f0-9]{40}$/);
     expect(requestId.length).toBeLessThanOrEqual(50);
     expect(cardRequestIdFromApproval('approval_test_02')).not.toBe(requestId);
+  });
+
+  it('does not match the repository secret scanner pattern', () => {
+    // Let bash evaluate the exact pattern assignment (including POSIX quoting).
+    const script = readFileSync(new URL('../../../scripts/check-secrets.sh', import.meta.url), 'utf8');
+    const assignment = script.split('\n').find(line => line.startsWith('pattern='));
+    expect(assignment).toBeDefined();
+    const scanned = spawnSync('bash', ['-c', `${assignment}\ngrep -qE -- "$pattern"`], {
+      input: JSON.stringify({ request_id: cardRequestIdFromApproval('approval_test_01') }),
+      encoding: 'utf8',
+    });
+    expect(scanned.error).toBeUndefined();
+    expect(scanned.status).toBe(1);
   });
 
   it.each(['50.00', 50, '12.34', 12.34, '0.01', 0.01, 0.29, 1.1, 1e21])('sends numeric amounts for create, update and simulation: %s', async amount => {
