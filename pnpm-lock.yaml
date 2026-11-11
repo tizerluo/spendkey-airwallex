@@ -36,6 +36,15 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
 
+  packages/compare:
+    dependencies:
+      '@sk/offers':
+        specifier: workspace:*
+        version: link:../offers
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
+
   packages/core:
     dependencies:
       '@sr/schema':
