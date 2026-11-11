@@ -1,7 +1,7 @@
-// 只匹配键名。自由文本里的 authorization、secret、token、cookie、pan 等普通词不走这里。
+// Match key names only. Plain words like authorization, secret, token, cookie, pan in free text do not route here.
 const sensitiveKey = /cvv|cvc|(?:^|_|-)pan(?:$|_|-)|card_?number|security_?code|card_?security|(?:card[\w-]*expir(?:y|ation)|expir(?:y|ation)[\w-]*card)|^number$|token|secret|api[-_]?key|password|passwd|authorization|cookie|private[-_]?key/i;
 
-// 自由文本只认高置信度形态，避免把商户名、失败原因和规则说明整段丢掉。
+// Free text matches only high-confidence patterns, so vendor names, failure reasons, and rule descriptions are not dropped wholesale.
 const highConfidencePatterns = [
   /\bsk-[a-z0-9_-]{16,}/i,
   /\bsk_(?:live|test)_[a-z0-9]{10,}/i,
@@ -25,10 +25,10 @@ function luhn(digits: string): boolean {
   return sum % 10 === 0;
 }
 
-/** 值是否含高置信度密钥或通过 Luhn 的独立 PAN（含空格和连字符）。 */
+/** Whether the value contains a high-confidence secret or a standalone Luhn-valid PAN (spaces and hyphens included). */
 function flagged(text: string): boolean {
   if (highConfidencePatterns.some(pattern => pattern.test(text))) return true;
-  // 哈希和 13 位纪元毫秒不参与 PAN 判断，避免审批哈希被误伤。
+  // Hashes and 13-digit epoch milliseconds are excluded from PAN checks so approval hashes are not flagged.
   if (/^(0x)?[0-9a-f]{32,}$/i.test(text) || /^[12]\d{12}$/.test(text)) return false;
   for (const match of text.matchAll(/(?<![\w-])\d(?:[ -]?\d){12,18}(?![\w-])/g)) {
     const digits = match[0].replace(/[ -]/g, '');
@@ -41,7 +41,7 @@ function unsafeKey(key: string): boolean {
   return key !== 'masked_card_number' && sensitiveKey.test(key);
 }
 
-/** 脱敏与最终守卫共用同一次遍历，避免两边规则漂移。 */
+/** Redaction and the final guard share one traversal to keep the rules from drifting. */
 function walk(value: unknown, sanitize: boolean): unknown {
   const ancestors = new Set<object>();
   function visit(item: unknown): unknown {
@@ -61,7 +61,7 @@ function walk(value: unknown, sanitize: boolean): unknown {
       ancestors.add(item);
       const result = Array.isArray(item) ? item.map(visit) : Object.fromEntries(
         Object.entries(item).flatMap(([key, child]) => {
-          // 敏感键名直接丢弃；键名本身不再套用自由文本词表。
+          // Sensitive key names are dropped outright; key names themselves are not matched against free text.
           if (unsafeKey(key)) {
             if (sanitize) return [];
             throw new Error('ledger_redaction_required');
@@ -81,11 +81,11 @@ function walk(value: unknown, sanitize: boolean): unknown {
   return visit(value);
 }
 
-/** 深拷贝 JSON：删除敏感键，并把高置信度密钥形态替换为 "[REDACTED]"。
- * 自由文本中的普通词会原样保留。masked_card_number 保留键名，值仍做内容检查。
- * append 会先对整条事件调用本函数，再跑 assertRedacted。
+/** Deep-copy JSON: drop sensitive keys and replace high-confidence secret patterns with "[REDACTED]".
+ * Ordinary words in free text are preserved. masked_card_number keeps its key, but its value is still content-checked.
+ * append calls this on the whole event first, then runs assertRedacted.
  */
 export function redactValue(value: unknown): unknown { return walk(value, true); }
 
-/** 最终守卫。自由文本只用高置信度形态；键只检查敏感键名。错误不回显键或值。 */
+/** Final guard. Free text uses only high-confidence patterns; keys only check sensitive key names. Errors never echo keys or values. */
 export function assertRedacted(value: unknown): void { walk(value, false); }

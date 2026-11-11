@@ -182,7 +182,7 @@ function purchaseEvents(): LedgerRecord[] {
 }
 
 describe('hashShort', () => {
-  it('取 0x 后面的前 12 个十六进制字符', () => {
+  it('takes the first 12 hex characters after 0x', () => {
     expect(hashShort(`0x${'ab'.repeat(6)}${'0'.repeat(52)}`)).toBe('abababababab');
     expect(hashShort(`0X${'cd'.repeat(32)}`)).toBe('cdcdcdcdcdcd');
     expect(hashShort('abcdefabcdef99')).toBe('abcdefabcdef');
@@ -190,7 +190,7 @@ describe('hashShort', () => {
 });
 
 describe('buildApprovalPageModel', () => {
-  it('用审批请求和账本记录生成页面模型，金额按币种格式化', () => {
+  it('builds the page model from the approval request and ledger records, formatting amounts by currency', () => {
     const approval = request();
     const built = buildApprovalPageModel({
       approvalId: 'approval_test_01',
@@ -248,7 +248,7 @@ describe('buildApprovalPageModel', () => {
     expect(html.includes('<script')).toBe(false);
   });
 
-  it('日元和科威特第纳尔不用两位小数，缺商户类别时需要填写', () => {
+  it('JPY and KWD do not use two decimals; a missing merchant category must be filled in', () => {
     const yen = buildApprovalPageModel({
       approvalId: 'approval_test_jpy',
       request: request({
@@ -279,7 +279,7 @@ describe('buildApprovalPageModel', () => {
     expect(dinar.model.card).toEqual({ cardId: 'card_test_kwd', maskedNumber: '****0000', status: 'ACTIVE' });
   });
 
-  it('无效审批请求抛出固定错误，不带出请求内容', () => {
+  it('an invalid approval request throws a fixed error without leaking the request body', () => {
     const approval = request({ offerId: '' });
     expect(() => buildApprovalPageModel({
       approvalId: 'approval_test_01',
@@ -292,7 +292,7 @@ describe('buildApprovalPageModel', () => {
 });
 
 describe('buildAuditPageModel', () => {
-  it('为每种事件生成摘要和短哈希，并把卡片限额格式化', () => {
+  it('summarizes each event with a short hash and formats card limits', () => {
     const events = [
       ...purchaseEvents(),
       envelope(6, {
@@ -380,7 +380,7 @@ describe('buildAuditPageModel', () => {
     expect(renderAuditPage(broken)).toContain('Chain BROKEN');
   });
 
-  it('对账找不到币种时保留最小单位，拒绝的决策没有 chosen', () => {
+  it('reconciliation without a currency keeps minor units; refused decisions have no chosen', () => {
     const events = [
       envelope(0, { kind: 'decision', action: 'refuse', reasons: ['reserve_breach'], ruleResults: [] }),
       envelope(1, {
@@ -409,7 +409,7 @@ describe('buildAuditPageModel', () => {
     expect(page.cards).toEqual([]);
   });
 
-  it('按最近一条 run_started 标注模式，离线页不出现 sandbox', () => {
+  it('labels the mode from the latest run_started; offline pages do not show sandbox', () => {
     const note = 'reserve floor 2,000.00 USD must remain after upfront charges';
     const events = [
       envelope(1, {
@@ -521,7 +521,7 @@ describe('buildAuditPageModel', () => {
     expect(tied.policyNotes).toEqual(['second']);
   });
 
-  it('sandbox 与 console_sandbox 使用沙箱标签，坏掉的最新 mode 变成 mode unknown', () => {
+  it('sandbox and console_sandbox use sandbox labels; a broken latest mode becomes mode unknown', () => {
     const simulated = envelope(1, {
       kind: 'authorization',
       source: 'simulated',

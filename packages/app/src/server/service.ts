@@ -5,6 +5,7 @@ import { redactValue, type LedgerStore } from '@sk/ledger';
 import { canonicalize } from '@sr/core';
 import { TransactionLoop } from './transactions.js';
 import type { ApprovalRecord, ApprovalStore } from './store.js';
+import { cardControlsReadback } from './airwallex-client.js';
 
 export class ServiceError extends Error {
   constructor(readonly code: string, readonly status = 400, readonly provider?: { status: number; code: string; message: string; step: string }) { super(code); }
@@ -239,8 +240,8 @@ export class ApprovalService {
       }
       if (card.card_status !== 'ACTIVE') throw new ServiceError('card_not_active', 409);
       step = 'controls readback';
-      const actual = card.authorization_controls ?? {};
-      const matches = canonicalize(normalizeControls(input.authorization_controls)) === canonicalize(normalizeControls(actual));
+      const actual = cardControlsReadback(this.options.client, card);
+      const matches = controlsMatch(input.authorization_controls, actual);
       this.options.ledger.append({ kind: 'controls_readback', cardId: card.card_id, matches,
         expected: input.authorization_controls, actual: redactValue(actual) as Record<string, unknown> }, this.now().toISOString());
       if (!matches) {
@@ -280,6 +281,24 @@ export function normalizeControls(value: unknown, key = ''): unknown {
   if (Array.isArray(value)) return value.map(item => normalizeControls(item, key)).sort((a, b) => canonicalize(a).localeCompare(canonicalize(b)));
   if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value)
     .map(([name, item]) => [name, normalizeControls(item, name)]));
-  if (key === 'amount' && (typeof value === 'number' || typeof value === 'string') && Number.isFinite(Number(value))) return Number(value);
+  if (key === 'amount' && (typeof value === 'number' || (typeof value === 'string' && /^-?\d+(?:\.\d+)?$/.test(value)))
+    && Number.isFinite(Number(value))) return Number(value);
   return value;
+}
+
+/** Compare sent keys recursively. Provider defaults stay visible in actual evidence. */
+export function controlsMatch(expected: unknown, actual: unknown, key = ''): boolean {
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual)) return false;
+    // Equality of sets, including object members projected onto the keys we sent.
+    return expected.every(item => actual.some(other => controlsMatch(item, other, key)))
+      && actual.every(item => expected.some(other => controlsMatch(other, item, key)));
+  }
+  if (expected !== null && typeof expected === 'object') {
+    if (actual === null || typeof actual !== 'object' || Array.isArray(actual)) return false;
+    const record = actual as Record<string, unknown>;
+    return Object.entries(expected).every(([name, value]) => Object.hasOwn(record, name)
+      && controlsMatch(value, record[name], name));
+  }
+  return normalizeControls(expected, key) === normalizeControls(actual, key);
 }

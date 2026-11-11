@@ -2,7 +2,8 @@ import { mkdirSync } from 'node:fs';
 import { openJsonlLedger } from '@sk/ledger';
 import { JsonApprovalStore } from '../server/store.js';
 import { ApprovalService } from '../server/service.js';
-import { AirwallexClient, loadAirwallexConfig } from '@sk/airwallex';
+import { loadAirwallexConfig } from '@sk/airwallex';
+import { createAppAirwallexClient } from '../server/airwallex-client.js';
 import { describeDemoFailure, runPreflight } from './preflight.js';
 import { cleanupDemoCards } from './safety.js';
 import { runDemo } from './run.js';
@@ -15,7 +16,7 @@ try {
     }
     const cardholderId = process.env['AIRWALLEX_CARDHOLDER_ID'];
     if (!cardholderId) throw new Error('demo_cardholder_id_required');
-    const client = new AirwallexClient(loadAirwallexConfig(), { fetch: globalThis.fetch });
+    const client = createAppAirwallexClient(loadAirwallexConfig(), globalThis.fetch);
     if (process.argv.includes('--preflight')) {
       step = 'preflight';
       if (!await runPreflight(client, cardholderId, console.log)) process.exitCode = 1;

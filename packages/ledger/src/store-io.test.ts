@@ -64,7 +64,7 @@ describe('durability and uncertain writes', () => {
     const ledger = openJsonlLedger(file());
     const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
     vi.mocked(closeSync).mockImplementationOnce(fd => { fs.closeSync(fd); throw new Error('synthetic_close_failure'); });
-    // 清理失败不再抛错，避免调用方把已成功的读取或追加当成失败后重试。
+    // Cleanup failure no longer throws, so a caller does not retry a read or append that already succeeded.
     expect(ledger.read()).toEqual([]);
     expect(ledger.read()).toEqual([]);
   });

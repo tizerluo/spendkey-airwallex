@@ -1,16 +1,18 @@
 import { copyFileSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { AirwallexClient, loadAirwallexConfig } from '@sk/airwallex';
+import { type AirwallexClient, loadAirwallexConfig } from '@sk/airwallex';
 import { runAgent, type AgentContext } from '@sk/agent';
 import { createCuratedSource } from '@sk/offers';
-import { InMemoryLedgerStore, parseJsonl, runLedgerCli, verifyChain, signedDecimalToMinor, type JsonlVerification, type LedgerStore } from '@sk/ledger';
+import { InMemoryLedgerStore, parseJsonl, runLedgerCli, verifyChain, signedDecimalToMinor, redactValue, type JsonlVerification, type LedgerStore } from '@sk/ledger';
 import { termsHash } from '@sk/policy';
 import { ApprovalService } from '../server/service.js';
 import { MemoryApprovalStore, type ApprovalStore } from '../server/store.js';
 import { reconciledSpendInWindowMinor, TransactionLoop } from '../server/transactions.js';
 import { installDemoSignalHandlers } from './safety.js';
 import { createFakeAirwallex } from './fake-airwallex.js';
+import { DEMO_POLICY_NOTES, demoReserveFloorMinor } from './policy.js';
+import { cardControlsReadback, createAppAirwallexClient } from '../server/airwallex-client.js';
 
 export function demoContext(service: ApprovalService): AgentContext {
   return {
@@ -27,9 +29,9 @@ export async function runDemo(options: {
 } = {}) {
   const now = options.now ?? (() => new Date());
   const fake = createFakeAirwallex({ now });
-  const client = options.client ?? new AirwallexClient(loadAirwallexConfig({
+  const client = options.client ?? createAppAirwallexClient(loadAirwallexConfig({
     AIRWALLEX_CLIENT_ID: 'test-client-id', AIRWALLEX_API_KEY: 'test-api-key',
-  }), { fetch: fake.fetch });
+  }), fake.fetch);
   const ledger = options.ledger ?? new InMemoryLedgerStore(); const store = options.store ?? new MemoryApprovalStore();
   const transcript: string[] = [];
   const say = (line: string) => { transcript.push(line); options.log?.(line); };
@@ -41,27 +43,21 @@ export async function runDemo(options: {
   });
   const loop = new TransactionLoop(service);
   const ctx = demoContext(service);
-  const policyNotes = [options.client
-    ? 'reserve floor = max(0, available USD balance - 500.00 USD) must remain after upfront charges (demo policy)'
-    : 'reserve floor 500.00 USD must remain after upfront charges',
-    'known obligation 100.00 USD within 30 days'];
+  const policyNotes = DEMO_POLICY_NOTES;
   ledger.append({ kind: 'run_started', mode: options.client ? 'sandbox' : 'offline_emulator', policyNotes }, now().toISOString());
   const uninstallSignals = options.handleSignals ? installDemoSignalHandlers(service, say, process, options.signalClose) : () => {};
   let frozen = false; let cardId: string | undefined; let requestId: string | undefined;
   try {
     say(options.client ? 'Airwallex sandbox demo; synthetic offers; demo-operator auto-approval' : 'Offline emulator (no Airwallex calls); emulated (offline); synthetic offers; demo-operator auto-approval');
-    if (options.client) {
-      const balances = await client.getBalances().catch((error: unknown) =>
-        service.providerFailure(error, '/api/v1/balances/current', 'balance check'));
-      const usd = balances.find(balance => balance.currency === 'USD');
-      if (!usd || signedDecimalToMinor(usd.available_amount, 'USD') < 16_000) throw new Error('demo_requires_usd_sandbox_funds');
-      // Leave $400 of upfront room after the synthetic $100 obligation, whatever the sandbox balance.
-      ctx.reserveFloorMinor = { USD: Math.max(0, signedDecimalToMinor(usd.available_amount, 'USD') - 50_000) };
-      ctx.balanceProvider = async () => balances;
-    }
+    const balances = await client.getBalances().catch((error: unknown) =>
+      service.providerFailure(error, '/api/v1/balances/current', 'balance check'));
+    const usd = balances.find(balance => balance.currency === 'USD');
+    if (!usd || signedDecimalToMinor(usd.available_amount, 'USD') < 16_000) throw new Error('demo_requires_usd_sandbox_funds');
+    ctx.reserveFloorMinor = { USD: demoReserveFloorMinor(balances) };
+    ctx.balanceProvider = async () => balances;
     const floor = ((ctx.reserveFloorMinor['USD'] ?? 0) / 100).toFixed(2);
     for (const note of policyNotes) say(`Demo policy: ${note}`);
-    if (options.client) say(`Demo policy: reserve floor ${floor} USD must remain after upfront charges`);
+    say(`Demo policy: reserve floor ${floor} USD must remain after upfront charges`);
     const result = await runAgent({ intent: 'design tool', usage: { horizonMonths: 12 },
       ctx, sources: [createCuratedSource()], ledger, approvalService: service });
     const annual = result.decision.ranked.find(entry => entry.candidate.plan === 'annual');
@@ -76,7 +72,7 @@ export async function runDemo(options: {
     if (!cardId) throw new Error('demo_expected_card');
     const readback = await client.getCard(cardId).catch((error: unknown) =>
       service.providerFailure(error, `/api/v1/issuing/cards/${cardId}`, 'controls transcript readback'));
-    say(`demo-operator approved (demoAutoApproved=true). Card ${readback.card_status}; controls read back: ${JSON.stringify(readback.authorization_controls)}`);
+    say(`demo-operator approved (demoAutoApproved=true). Card ${readback.card_status}; controls read back: ${JSON.stringify(redactValue(cardControlsReadback(client, readback)))}`);
     const cases = [
       { amount: '10.00', currency: 'USD', mcc: '7372', expected: 'approved' },
       { amount: '61.00', currency: 'USD', mcc: '7372', expected: 'limit_exceeded' },

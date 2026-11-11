@@ -8,3 +8,4 @@ coverage/
 *.log
 demo-output/
 console-data/
+console-data-offline/

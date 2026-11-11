@@ -11,6 +11,66 @@ Each render function returns a complete HTML document. The terms hash is
 selectable text. There is no copy button and no inline script, so the page
 matches `CONSOLE_CSP` with `default-src 'none'`.
 
+## Offline console video
+
+From the repository root, run `pnpm console:offline`. No credentials are
+needed or read. The client uses only `createFakeAirwallex().fetch`; it cannot
+call Airwallex or the network. Open <http://127.0.0.1:8787> using `127.0.0.1`,
+not `localhost`. To change the port, use `CONSOLE_PORT=8788 pnpm console:offline`.
+The header says “Offline emulator (no Airwallex calls)”.
+
+Each start creates a unique gitignored `console-data-offline/run-*/` directory;
+previous runs are preserved, never resumed. The terminal prints the exact
+`ledger.jsonl` path, a fresh `APPROVAL NONCE`, and a fresh `OPERATOR TOKEN`.
+Card and transaction state lives in the emulator process, so restarting means
+a new request and new card. The offline console uses human approval and does
+not auto-approve.
+
+For the fallback video:
+
+1. Follow the DesignCo request link. Show annual `reserve_breach` and monthly
+   USD 60.00 awaiting approval. Paste the terminal nonce into the approval form
+   and select “Approve exactly these terms”. Issuance is emulated.
+2. In “Simulate authorization — emulated (offline)”, paste the operator token.
+   Submit amount `10.00`, currency `USD`, MCC `7372`: `approved`. Return to the
+   approval page and submit `61.00` / `USD` / `7372`: `limit_exceeded`. Repeat
+   with `1.00` / `USD` / `5812`: `merchant_category_not_allowed`. Each JSON
+   response includes `label: "emulated (offline)"`.
+3. Return to the approval page, paste the operator token and freeze the card.
+   Return and simulate `1.00` / `USD` / `7372`: `card_inactive` (the ledger's
+   provider-shaped failure reason is `CARD_INACTIVE`). Return and reconcile
+   with the operator token: settled `1000` minor units and three failures.
+4. Open `/audit`. Show “Chain valid”, the policy notes, and “emulated (offline)”
+   authorization labels. This demonstrates our local emulator, not Airwallex
+   enforcement.
+5. Keep the server running. Copy the printed ledger path into the command below
+   in place of `console-data-offline/run-XXXXXX/ledger.jsonl`. It changes only
+   the first line's first policy note, leaving valid JSON and the hashes intact:
+
+   ```bash
+   python3 - console-data-offline/run-XXXXXX/ledger.jsonl <<'PY'
+   import json, pathlib, sys
+   path = pathlib.Path(sys.argv[1])
+   lines = path.read_text().splitlines()
+   first = json.loads(lines[0])
+   first["event"]["policyNotes"][0] += " (edited)"
+   lines[0] = json.dumps(first, separators=(",", ":"))
+   path.write_text("\n".join(lines) + "\n")
+   PY
+   ```
+
+6. Refresh `/audit`: it shows “Chain BROKEN” and `hash_mismatch`. The read-only
+   audit route diagnoses the on-disk file; normal ledger reads and writes still
+   reject a broken chain. Restart `pnpm console:offline` for a fresh recording.
+   Publish the original head hash outside the file when demonstrating anchored
+   verification; recomputing all hashes can otherwise hide an edit.
+
+The demo script, live console seed, and offline console share the same synthetic
+reserve policy: `floor = max(0, USD available - 500.00)`, plus a USD 100.00
+obligation within 30 days. `run_started.policyNotes` records that rule. At USD
+1,000, USD 1,200 or USD 1,000,000 available, annual is refused for
+`reserve_breach` and monthly asks for human approval.
+
 Every interpolated string passes through `escapeHtml` before it is placed in
 text or attributes. Callers must pass masked card numbers only. Do not pass a
 PAN, CVV, API key, token, or the approval nonce. `nonceHint` is rendered as
@@ -222,14 +282,17 @@ throwing stub. These tests never call it. Fixture values are synthetic
 
 `pnpm demo:sandbox --preflight` checks balances, issuing configuration and the existing cardholder without card mutations or local store writes. `pnpm demo:sandbox cleanup` confirms each stored demo card and freezes every non-INACTIVE card. A stale approval-store lock fails with its age; after confirming the owner stopped, first remove `demo-output/sandbox/approvals.json.lock`, then run `pnpm demo:sandbox cleanup` and audit/verify before another demo. Cleanup needs to acquire that lock and cannot run until it is removed. Neither sandbox command has been live verified.
 
-Controls readback currently compares the full expected and actual control objects,
-including provider defaults. Amount strings are normalized numerically and arrays
-are compared without ordering. Missing, changed, or extra provider controls fail
-closed: `controls_readback` retains redacted expected/actual evidence, the service
-auto-freezes the card, and failure evidence uses reason `controls_mismatch`.
-Before a live run, check provider defaults against the submitted controls; extra
-keys can cause a conservative mismatch. The current ledger contract has no
-`controls_readback.extra` field, so extras remain in `actual`.
+Controls readback compares only the keys sent in the card request, recursively.
+Decimal amount strings and numbers compare numerically, arrays compare as sets,
+and object key order is irrelevant. Provider additions (including nested
+`remaining` values, validity dates, defaults and nulls) do not change the match
+decision. Every sent key must still be present and equal; a missing MCC list or
+a changed limit fails closed, auto-freezes the card, and records
+`controls_mismatch`. The app's injected transport adapter keeps the raw controls
+object separately from validated card metadata so provider extras are preserved
+and missing sent controls can be recorded as mismatches. `controls_readback`
+retains the full redacted provider object in `actual`, including extras; there
+is no separate `extra` field. This behavior is verified offline, not live.
 
 On SIGINT or SIGTERM the demo waits for in-flight issuance, then cleans up and
 exits non-zero. A second signal exits immediately if issuance or cleanup hangs;

@@ -19,6 +19,7 @@
     "demo:offline": "pnpm build && node packages/app/dist/demo/cli.js offline",
     "demo:sandbox": "pnpm build && node packages/app/dist/demo/cli.js sandbox",
     "console": "pnpm build && node packages/app/dist/server/cli.js",
+    "console:offline": "pnpm build && node packages/app/dist/server/offline-cli.js",
     "audit:verify": "pnpm --filter @sk/ledger build && node scripts/audit-verify.js"
   },
   "devDependencies": {

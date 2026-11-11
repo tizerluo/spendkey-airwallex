@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { inspect } from 'node:util';
+import { describe, expect, it, vi } from 'vitest';
 import {
   AirwallexApiError, AirwallexClient, AirwallexResponseError, AirwallexSafetyError,
   assertSafeCardPath, cardholderInputSchema, cardRequestIdFromApproval, createCardInputSchema, loadAirwallexConfig,
@@ -17,7 +18,7 @@ function json(body: unknown, status = 200): Response {
 }
 interface Call { method: string; path: string; query: URLSearchParams; init: RequestInit }
 type Handler = (call: Call, count: number) => Response | Promise<Response>;
-function harness(overrides: Record<string, Handler> = {}, baseUrl?: string) {
+function harness(overrides: Record<string, Handler> = {}, baseUrl?: string, timeoutMs?: number) {
   let now = START;
   const calls: Call[] = [];
   const counts = new Map<string, number>();
@@ -50,7 +51,9 @@ function harness(overrides: Record<string, Handler> = {}, baseUrl?: string) {
     AIRWALLEX_CLIENT_ID: 'test-client-id', AIRWALLEX_API_KEY: 'test-api-key',
     ...(baseUrl === undefined ? {} : { AIRWALLEX_BASE_URL: baseUrl }),
   });
-  const client = new AirwallexClient(config, { fetch, now: () => now });
+  const client = new AirwallexClient(config, {
+    fetch, now: () => now, ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  });
   return { client, calls, counts, setNow: (value: number) => { now = value; } };
 }
 const cardInput: CreateCardInput = createCardInputSchema.parse({
@@ -84,7 +87,10 @@ describe('authentication', () => {
     await h.client.getBalances();
     expect(h.counts.get('POST /api/v1/authentication/login')).toBe(2);
     const login = h.calls[0];
-    expect(login?.init).toEqual({ method: 'POST', redirect: 'error', headers: { 'x-client-id': 'test-client-id', 'x-api-key': 'test-api-key' } });
+    expect(login?.init).toEqual({
+      method: 'POST', redirect: 'error', signal: expect.any(AbortSignal),
+      headers: { 'x-client-id': 'test-client-id', 'x-api-key': 'test-api-key' },
+    });
     expect(login?.init).not.toHaveProperty('body');
     expect(h.calls[1]?.init.headers).toEqual({ Authorization: 'Bearer test-token-01' });
   });
@@ -362,6 +368,84 @@ describe('errors and validation', () => {
   it('sanitizes transport exceptions', async () => {
     const h = harness({ 'POST /api/v1/authentication/login': () => { throw new Error('test-api-key'); } });
     await expect(h.client.getBalances()).rejects.toMatchObject({ status: 0, code: 'NETWORK_ERROR', message: 'Airwallex request failed' });
+  });
+
+  it('uses a 30s AbortSignal.timeout on every request unless the client overrides it', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    const h = harness();
+    await h.client.getBalances();
+    expect(timeout.mock.calls.map(call => call[0])).toEqual([30_000, 30_000]);
+    expect(h.calls.every(call => call.init.signal instanceof AbortSignal)).toBe(true);
+    timeout.mockRestore();
+    const custom = vi.spyOn(AbortSignal, 'timeout');
+    const short = harness({}, undefined, 25);
+    await short.client.getIssuingConfig();
+    expect(custom.mock.calls.map(call => call[0])).toEqual([25, 25]);
+  });
+
+  it('fails a hung createCard as NETWORK_TIMEOUT and recovers by lookup only', async () => {
+    const h = harness({
+      'POST /api/v1/issuing/cards/create': () => new Promise<Response>(() => {}),
+      'GET /api/v1/issuing/cards': () => json({ items: [], has_more: false }),
+    }, undefined, 30);
+    await expect(h.client.createCard(cardInput)).rejects.toMatchObject({
+      status: 0, code: 'NETWORK_TIMEOUT', message: 'Airwallex request timed out',
+    });
+    const create = h.calls.filter(call => call.path === '/api/v1/issuing/cards/create');
+    expect(create).toHaveLength(1);
+    expect(create[0]?.init.signal?.aborted).toBe(true);
+    await expect(h.client.findCardByRequestId('request_test_01', {
+      cardholderId: 'cardholder_test_01', createdAfter: '2030-01-01T00:00:00Z',
+    })).resolves.toBeUndefined();
+    expect(h.calls.filter(call => call.path === '/api/v1/issuing/cards/create')).toHaveLength(1);
+    expect(h.counts.get('GET /api/v1/issuing/cards')).toBe(1);
+  });
+
+  it('does not retry a non-timeout createCard transport failure', async () => {
+    const h = harness({ 'POST /api/v1/issuing/cards/create': () => { throw new Error('socket hang up'); } });
+    await expect(h.client.createCard(cardInput)).rejects.toMatchObject({ status: 0, code: 'NETWORK_ERROR', message: 'Airwallex request failed' });
+    expect(h.counts.get('POST /api/v1/issuing/cards/create')).toBe(1);
+  });
+
+  it('rejects a non-positive timeout before any request', () => {
+    expect(() => harness({}, undefined, 0)).toThrow(AirwallexSafetyError);
+  });
+
+  it('reports zod paths and codes without response values', async () => {
+    const pan = '4111111111111111';
+    const token = 'tok_test_secret_looking';
+    const leaked = (value: unknown) => `${String(value)}\n${JSON.stringify(value)}\n${inspect(value, { depth: null, showHidden: true })}`;
+    const balances = harness({
+      'GET /api/v1/balances/current': () => json([{
+        currency: 'USD', available_amount: token, pending_amount: '0.00', reserved_amount: '0.00',
+        total_amount: '10.00', prepayment_amount: '0.00', account_type: 'CURRENT', pan, access_token: token,
+      }]),
+    });
+    const balanceError = await balances.client.getBalances().catch((reason: unknown) => reason);
+    expect(balanceError).toBeInstanceOf(AirwallexResponseError);
+    expect(balanceError).toMatchObject({
+      endpoint: '/api/v1/balances/current',
+      issues: [{ path: '0.available_amount', code: 'invalid_string' }],
+    });
+    expect(leaked(balanceError)).not.toContain(pan);
+    expect(leaked(balanceError)).not.toContain(token);
+    const config = harness({
+      'GET /api/v1/issuing/config': () => json({ primary_currency: { pan, token }, note: token }),
+    });
+    const configError = await config.client.getIssuingConfig().catch((reason: unknown) => reason);
+    expect(configError).toMatchObject({
+      endpoint: '/api/v1/issuing/config',
+      issues: [{ path: 'primary_currency', code: 'invalid_type' }],
+    });
+    expect(leaked(configError)).not.toContain(pan);
+    expect(leaked(configError)).not.toContain(token);
+    const scrubbed = new AirwallexResponseError(`/api/v1/balances/current?note=${token}`, [
+      { path: `items.${pan}.token`, code: `invalid ${token}` },
+    ]);
+    expect(scrubbed.endpoint).toBe('/api/v1/balances/current');
+    expect(scrubbed.issues).toEqual([{ path: 'items._.token', code: 'invalid' }]);
+    expect(leaked(scrubbed)).not.toContain(pan);
+    expect(leaked(scrubbed)).not.toContain(token);
   });
 
   it('rejects malformed successful responses without exposing their contents', async () => {

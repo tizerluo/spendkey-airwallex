@@ -94,9 +94,9 @@ export function openJsonlLedger(path: string): LedgerStore {
     let result!: T;
     try { result = operation(); }
     catch (error) { failed = true; operationError = error; }
-    // 清理失败不能盖住已经成功的追加，否则调用方会重试并写出第二条记录。
-    try { closeSync(lockFd); } catch { /* 锁残留交给过期回收。 */ }
-    try { unlinkSync(lock); } catch { /* 同上。 */ }
+    // Cleanup failure must not mask a successful append, or the caller will retry and write a second record.
+    try { closeSync(lockFd); } catch { /* Leftover lock is reclaimed after expiry. */ }
+    try { unlinkSync(lock); } catch { /* Same as above. */ }
     if (failed) throw operationError;
     return result;
   }
