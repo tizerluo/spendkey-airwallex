@@ -20,6 +20,7 @@ export type {
   AuditEventRow,
   AuditPageModel,
   ChargeInterval,
+  ConsoleRunMode,
   IndexApprovalRow,
   IndexPageModel,
   PaymentRail,

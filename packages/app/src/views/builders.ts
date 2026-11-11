@@ -1,6 +1,6 @@
 // 把账本记录和审批请求收成视图模型。摘要和短哈希只在这里定义。
 
-import type { CardAuditEvent, ChainVerification, LedgerEvent } from '@sk/ledger';
+import type { CardAuditEvent, ChainVerification } from '@sk/ledger';
 import { termsHash, type ApprovalRequest } from '@sk/policy';
 import { formatMinor, formatMinorRange, formatSignedDecimal } from './money.js';
 import type {
@@ -13,9 +13,26 @@ import type {
   AuditPageModel,
   IndexPageModel,
 } from './models.js';
+import {
+  controlsReadbackSummary,
+  freezeActorLabel,
+  isControlsMismatch,
+  latestRun,
+  runStartedSummary,
+  type ViewAuditEvent,
+} from './run-mode.js';
 
-/** @sk/ledger 的账本信封。服务器直接把读出的记录传进来。 */
-export type LedgerRecord = LedgerEvent;
+/**
+ * 账本信封。event 比 @sk/ledger 宽，以便在 schema 加入 run_started / controls_readback 之前渲染它们。
+ * 服务器传来的 LedgerEvent 可以赋给这个类型。
+ */
+export interface LedgerRecord {
+  seq: number;
+  at: string;
+  prevHash: string;
+  hash: string;
+  event: ViewAuditEvent;
+}
 
 /** 服务器保存的一条审批。比较表从 events 里的账本记录拼出来。 */
 export interface ApprovalRecordInput {
@@ -39,12 +56,21 @@ export interface IndexRecordInput {
   status: ApprovalStatus;
 }
 
-/** Format index amounts in one place, preserving the store's order. */
-export function buildIndexPageModel(records: readonly IndexRecordInput[]): IndexPageModel {
-  return { approvals: records.map(({ request, status }) => ({
+/**
+ * 列表金额在这里格式化，并保留调用方的顺序。
+ * events 应传入整本账本。不传时没有 run_started，页面写 mode unknown，不会猜成 sandbox。
+ */
+export function buildIndexPageModel(
+  records: readonly IndexRecordInput[],
+  events: readonly LedgerRecord[] = [],
+): IndexPageModel {
+  const model: IndexPageModel = { approvals: records.map(({ request, status }) => ({
     id: request.approvalRequestId, vendor: request.vendor, status,
     amount: minorAmount(request.amountMinor, request.currency), currency: request.currency,
   })) };
+  const started = latestRun(events);
+  if (started !== undefined) model.runMode = started.mode;
+  return model;
 }
 
 /** 哈希去掉 0x 前缀后的前 12 个十六进制字符。 */
@@ -59,6 +85,7 @@ export function buildAuditPageModel(
   verifyResult: ChainVerification,
 ): AuditPageModel {
   const index = indexLedger(events);
+  const started = latestRun(events);
   const model: AuditPageModel = {
     chainValid: verifyResult.ok,
     events: events.map((record) => toAuditRow(record, index)),
@@ -66,6 +93,10 @@ export function buildAuditPageModel(
   };
   if (!verifyResult.ok && verifyResult.error !== undefined && verifyResult.error !== '') {
     model.verifyError = verifyResult.error;
+  }
+  if (started !== undefined) {
+    model.runMode = started.mode;
+    if (started.policyNotes.length > 0) model.policyNotes = [...started.policyNotes];
   }
   return model;
 }
@@ -117,6 +148,8 @@ export function buildApprovalPageModel(input: ApprovalRecordInput): BuiltApprova
         && event.demoAutoApproved;
     }),
   };
+  const started = latestRun(events);
+  if (started !== undefined) model.runMode = started.mode;
   if (card !== undefined) model.card = card;
   return { model, csrfToken: input.csrf };
 }
@@ -153,8 +186,12 @@ function indexLedger(events: readonly LedgerRecord[]): LedgerIndex {
 }
 
 /** 每种账本事件的摘要。调用方不要再各自写一套。 */
-function summarize(event: CardAuditEvent, index: LedgerIndex): string {
+function summarize(event: ViewAuditEvent, index: LedgerIndex): string {
   switch (event.kind) {
+    case 'run_started':
+      return runStartedSummary(event);
+    case 'controls_readback':
+      return controlsReadbackSummary(event);
     case 'offers_snapshot':
       return `Offers for "${event.intent}": ${event.offers.length}`;
     case 'comparison':
@@ -187,7 +224,7 @@ function summarize(event: CardAuditEvent, index: LedgerIndex): string {
       return `${amount} at ${merchant} (${event.mapped})`;
     }
     case 'card_frozen':
-      return `Frozen by ${event.by}: ${event.reason}`;
+      return `Frozen by ${freezeActorLabel(event.by)}: ${event.reason}`;
     case 'reconciliation': {
       const currency = index.cardCurrency.get(event.cardId);
       return `Settled ${minorText(event.settledMinor, currency)}, pending ${minorText(event.pendingMinor, currency)}, ${event.failedCount} failed`;
@@ -236,6 +273,7 @@ function toAuditRow(record: LedgerRecord, index: LedgerIndex): AuditEventRow {
     hashShort: hashShort(record.hash),
   };
   if (record.event.kind === 'authorization') row.source = record.event.source;
+  if (isControlsMismatch(record.event)) row.warning = true;
   return row;
 }
 

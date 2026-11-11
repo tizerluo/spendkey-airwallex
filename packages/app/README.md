@@ -25,8 +25,10 @@ digest and compares digests in constant time. Supply the token in
 `X-Operator-Token` or paste it into the console's empty `operatorToken` password
 field. Simulate, freeze, reconcile, and `POST /approvals/:id/recover` also require
 the approval's CSRF field. Tokens are never returned in responses or persisted
-in the approval store or ledger. A console freeze records the authenticated
-operator as `by: "human"`; internal agent freezes remain `by: "agent"`.
+in the approval store or ledger. The audit page prints `card_frozen.by` as
+recorded. `system` is shown as “system (auto)”. A human freeze is `by: "human"`
+(demo runs use a reason starting `demo-operator:`). The agent package cannot
+freeze a card.
 
 Simulate and reconcile require approval status `issued`. Freeze is available
 for any known card, including an unconfirmed issuance. Recovery requires a
@@ -124,17 +126,31 @@ still has to enforce that.
 ### `renderAuditPage(model)`
 
 Badge text is “Chain valid” or “Chain BROKEN”. A `verifyError` is shown only
-when the chain is broken. The event table marks `source: "simulated"` as
-“sandbox simulation” and `source: "observed"` as “sandbox event (observed)”.
+when the chain is broken. Labels come from the latest `run_started.mode`
+(highest `seq`):
+
+- `offline_emulator` → “Offline emulator (no Airwallex calls)”. Every
+  authorization row says “emulated (offline)”. The page does not use the word
+  sandbox.
+- `sandbox` or `console_sandbox` → “Airwallex sandbox”. `source: "simulated"`
+  is “sandbox simulation”; `source: "observed"` is “sandbox event (observed)”.
+- No `run_started`, or a latest event whose `mode` is not one of those three →
+  “mode unknown”. Authorization rows also say “mode unknown”.
+
 An authorization row with no source says “source missing”. A
 `card_issue_unconfirmed` row uses a warning style and the word “Unconfirmed”.
-A card table shows id, status, limit, and currency.
+A `controls_readback` row says “controls read back: match” or
+“controls read back: MISMATCH”. A mismatch uses the warning style. Expected and
+actual control objects are not printed. Policy notes on that same
+`run_started` are listed when present. A card table shows id, status, limit,
+and currency.
 
 ### `renderIndexPage({ approvals })`
 
 Lists approval id, status, vendor, amount, and currency. Each id links to
-`/approvals/:id`. The shared header links to `/` and `/audit`. The footer says
-card numbers on these pages are masked.
+`/approvals/:id`. The shared header links to `/` and `/audit`. Each page states
+the run mode. The footer repeats that label and says card numbers on these
+pages are masked.
 
 ## Money
 
@@ -154,18 +170,23 @@ instead of rounding.
 the `ApprovalRequest` from `createApprovalRequest`, `status`, `nonceHint`,
 `csrf`, an optional `card`, and optional ledger `events`. It formats amounts,
 fills comparison rows, reasons, intent, and the demo flag from those events,
-and sets `presentedTermsHash` with `termsHash`. It returns `{ model, csrfToken }`.
+and sets `presentedTermsHash` with `termsHash`. It also sets `runMode` from the latest `run_started` in `events`. It returns `{ model, csrfToken }`.
 The model does not contain the csrf token or the nonce.
 
-`buildAuditPageModel(events, verifyResult)` maps each `LedgerEvent` to a row.
+`buildAuditPageModel(events, verifyResult)` maps each ledger record to a row.
 `hashShort` is the first 12 hex characters after an optional `0x` prefix.
 Per-kind summaries live in that one function. `verifyResult` is the ledger
 `ChainVerification`. When `ok` is true, `verifyError` is omitted.
+`run_started` and `controls_readback` are read with view-local types, so a
+ledger that does not have those kinds yet still builds. A missing kind is
+skipped. `runMode` is set only when the latest `run_started` has a known mode.
 
-`buildIndexPageModel(records)` accepts records with `request` and `status`,
-formats their amounts, and preserves their order. Audit builders catch money
-formatting errors and show `<raw amount> <currency> (unformatted)` so odd or
-tampered rows remain visible.
+`buildIndexPageModel(records, events?)` accepts records with `request` and
+`status`, formats their amounts, and preserves their order. Pass the ledger as
+the second argument so the index can show the same run mode. Omit it and the
+page says “mode unknown”. Audit builders catch money formatting errors and
+show `<raw amount> <currency> (unformatted)` so odd or tampered rows remain
+visible.
 
 `chosen.rail` is required in the view model and is filled from the policy request.
 The server sets `demoMode` before approval when running the demo; ledger-only
@@ -189,23 +210,3 @@ pnpm --filter @sk/app lint
 Vitest uses the repository offline setup, which replaces global `fetch` with a
 throwing stub. These tests never call it. Fixture values are synthetic
 (`approval_request_test_01`, `card_test_01`, `****0000`).
-
-## 工作记录
-
-### 我们实现了哪些功能？
-
-`@sk/app` 的审批页、审计页和审批列表。三个函数返回完整 HTML：条款、原因芯片、比较表、x402 与地区排除说明、批准/拒绝表单、哈希链徽章、模拟/观测标签、卡片摘要。所有插值经 `escapeHtml`。
-
-M3-FE1-FIX：删掉复制哈希的内联脚本和按钮，导出 `CONSOLE_CSP`。增加 `formatMinor` / `formatSignedDecimal` / `formatMinorRange`。增加 `buildApprovalPageModel` 和 `buildAuditPageModel`，摘要和 `hashShort`（去掉 `0x` 后的前 12 位）集中在 builders。x402 的结果列写成 “Not payable by card”；选中的 rail 不是 card 时不渲染批准表单；非 `requested` 时禁用整个 fieldset。授权缺少来源显示 “source missing”。`card_issue_unconfirmed` 用警告样式。链完整时不展示 `verifyError`。去掉哈希的 title 提示，页脚改为说明卡号已经掩码。
-
-### 我们遇到了哪些错误？
-
-全仓库 `typecheck`、`lint`、`test` 和 `scripts/check-secrets.sh` 都通过了。写测试时有一处断言和页面文案对不上：`mcc_required_at_approval` 会被渲染成 “Merchant category is required at approval”，HTML 里不再保留原始代码。`pnpm install` 还打印了仓库里原有的提示，esbuild 的安装脚本被忽略。安装本身成功，锁文件只增加了 `packages/app` 这一条空依赖。
-
-审查要求去掉脚本并补上金额和 builder。审批模型原先把金额当成已经格式化好的字符串，服务器会各自换算小数位。
-
-### 我们是如何解决这些错误的？
-
-断言改为检查芯片上的那句文案，并确认 `needsMcc` 为 false 时输出里没有 `merchantCategoryCode`。esbuild 的提示不是这次引入的，没有改构建脚本白名单。
-
-金额用十进制字符串按币种刻度拼接，不走浮点，多出来的非零小数直接抛错。页面模型从 `ApprovalRequest` 和账本记录生成，条款哈希调用 `@sk/policy` 的 `termsHash`，校验失败时只抛 `invalid_approval_request`。

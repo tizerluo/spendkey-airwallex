@@ -1,5 +1,8 @@
 // 三个页面共用的文档外壳。样式内联，不引用外部字体、脚本或图片。
 
+import type { ConsoleRunMode } from './models.js';
+import { runModeLabel } from './run-mode.js';
+
 /** 把任意文本变成可放进 HTML 文本节点和属性值的字符串。先替换 &，避免二次转义。 */
 export function escapeHtml(value: string): string {
   return value
@@ -105,7 +108,7 @@ tr.x402 { background: #fff7ed; }
 fieldset { border: 0; margin: 0; padding: 0; min-inline-size: 0; }
 fieldset:disabled { opacity: 0.55; }
 .warning { color: #92400e; font-weight: 700; }
-tr.unconfirmed { background: #fffbeb; }
+tr.unconfirmed, tr.mismatch { background: #fffbeb; }
 label { display: block; font-weight: 600; margin-top: 0.8rem; }
 input[type="text"] {
   width: 100%;
@@ -156,8 +159,17 @@ ${body}
 `;
 }
 
-/** 三个页面共用的页头、主区域和页脚。 */
-export function consoleBody(main: string, current: 'approvals' | 'audit'): string {
+/** 三个页面顶部的运行模式。文案只来自 runModeLabel，离线时不含 sandbox。 */
+export function runModeBlock(mode: ConsoleRunMode | undefined): string {
+  return `<p id="run-mode">${escapeHtml(runModeLabel(mode))}</p>`;
+}
+
+/** 三个页面共用的页头、主区域和页脚。页脚重复运行模式，避免离线页写死 sandbox。 */
+export function consoleBody(
+  main: string,
+  current: 'approvals' | 'audit',
+  runMode: ConsoleRunMode | undefined,
+): string {
   return `<a class="skip" href="#content">Skip to content</a>
 <header class="top">
 <p class="brand"><a href="/">Spendkey for Cards</a></p>
@@ -170,6 +182,6 @@ export function consoleBody(main: string, current: 'approvals' | 'audit'): strin
 ${main}
 </main>
 <footer>
-<p>Sandbox console for approval and audit. Card numbers on these pages are masked.</p>
+<p>${escapeHtml(runModeLabel(runMode))}. Card numbers on these pages are masked.</p>
 </footer>`;
 }

@@ -1,6 +1,6 @@
 // 审批列表。每一行链到对应的审批页，审计页从页头进入。
 
-import { consoleBody, escapeHtml, renderDocument, segmentPath } from './html.js';
+import { consoleBody, escapeHtml, renderDocument, runModeBlock, segmentPath } from './html.js';
 import type { IndexPageModel } from './models.js';
 
 /** 渲染审批列表页。没有请求时给出空状态，而不是一张空表。 */
@@ -9,9 +9,10 @@ export function renderIndexPage(model: IndexPageModel): string {
     ? '<p>No approval requests.</p>'
     : approvalTable(model);
   const main = `<h1>Approvals</h1>
+${runModeBlock(model.runMode)}
 <p>A person approves the exact terms before a card is issued.</p>
 ${body}`;
-  return renderDocument('Approvals', consoleBody(main, 'approvals'));
+  return renderDocument('Approvals', consoleBody(main, 'approvals', model.runMode));
 }
 
 /** 列表保持调用方给出的顺序。 */
