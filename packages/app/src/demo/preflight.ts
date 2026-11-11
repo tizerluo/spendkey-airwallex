@@ -3,6 +3,29 @@ import { AirwallexApiError, AirwallexResponseError } from '@sk/airwallex';
 import { redactValue, signedDecimalToMinor } from '@sk/ledger';
 import { ServiceError } from '../server/service.js';
 
+/** 只接受短的枚举样式。超长、带空格或连续 13 位数字（卡号形态）都不打印。 */
+const OBSERVED_ENUM = /^[A-Za-z0-9_]{1,32}$/;
+const PRINTABLE_FAILURE = /^(approval_store_(stale_lock|locked):|demo_[a-z_]+(?: observed_(?:primary_currency|cardholder_status)=[A-Za-z0-9_]{1,32})?$)/;
+
+function observedEnum(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !OBSERVED_ENUM.test(value) || /\d{13,}/.test(value)) return undefined;
+  return value;
+}
+
+function mismatch(code: string, field: 'primary_currency' | 'cardholder_status', value: unknown): Error {
+  const observed = observedEnum(value);
+  return new Error(observed === undefined ? code : `${code} observed_${field}=${observed}`);
+}
+
+function responseShapeDetail(error: AirwallexResponseError): string {
+  const parts: string[] = [];
+  if (error.endpoint) parts.push(`endpoint=${error.endpoint}`);
+  if (error.issues.length > 0) {
+    parts.push(`issues=${error.issues.map(issue => issue.path ? `${issue.path}:${issue.code}` : issue.code).join(',')}`);
+  }
+  return parts.join(' ');
+}
+
 export function describeDemoFailure(error: unknown, step: string): string {
   if (error instanceof ServiceError && error.provider) {
     const p = error.provider;
@@ -12,9 +35,13 @@ export function describeDemoFailure(error: unknown, step: string): string {
     const p = redactValue({ code: error.code, message: error.message }) as { code: string; message: string };
     return `${step}: status=${error.status} code=${p.code} message=${p.message}`;
   }
-  if (error instanceof AirwallexResponseError) return `${step}: invalid Airwallex response shape`;
+  if (error instanceof AirwallexResponseError) {
+    const detail = responseShapeDetail(error);
+    return detail ? `${step}: invalid Airwallex response shape ${detail}` : `${step}: invalid Airwallex response shape`;
+  }
   if (error instanceof ServiceError) return `${step}: ${error.code}`;
-  if (error instanceof Error && /^(approval_store_(stale_lock|locked):|demo_[a-z_]+$)/.test(error.message)) return `${step}: ${error.message}`;
+  // 十三位以上数字一律不打印，避免观测值通道把卡号带回终端。
+  if (error instanceof Error && PRINTABLE_FAILURE.test(error.message) && !/\d{13,}/.test(error.message)) return `${step}: ${error.message}`;
   return `${step}: failed; inspect the local ledger and recover/freeze any unconfirmed issuance`;
 }
 
@@ -30,12 +57,12 @@ export async function runPreflight(client: AirwallexClient, cardholderId: string
     }],
     ['Issuing config', async () => {
       const config = await client.getIssuingConfig();
-      if (config.primary_currency !== 'USD') throw new Error('demo_requires_usd_issuing');
+      if (config.primary_currency !== 'USD') throw mismatch('demo_requires_usd_issuing', 'primary_currency', config.primary_currency);
       return 'primary currency USD';
     }],
     ['Cardholder', async () => {
       const holder = await client.getCardholder(cardholderId);
-      if (!['ACTIVE', 'READY'].includes(holder.status)) throw new Error('demo_cardholder_not_usable');
+      if (!['ACTIVE', 'READY'].includes(holder.status)) throw mismatch('demo_cardholder_not_usable', 'cardholder_status', holder.status);
       return 'usable status';
     }],
   ];
