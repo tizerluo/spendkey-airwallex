@@ -1,7 +1,11 @@
-import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { AirwallexClient, cardNicknameFromRequestId, createCardInputSchema, loadAirwallexConfig } from './index.js';
+import { AirwallexSafetyError } from './errors.js';
+import {
+  AirwallexClient, CARD_NICKNAME_MAX_LENGTH, cardNicknameFromRequestId, cardSchema, createCardInputSchema, loadAirwallexConfig,
+} from './index.js';
 
 const input = createCardInputSchema.parse({
   ...JSON.parse(readFileSync(new URL('../fixtures/card-create.json', import.meta.url), 'utf8')),
@@ -75,16 +79,42 @@ describe('tolerant card responses', () => {
     const body = { card_id: 'card_test_01', cvv: 'test-cvv', nested: {
       PAN: 'test-pan', card_number: 'test-number', card_number_masked: '****0000',
       masked_card_number: '123456******0000', cvc: 'test-cvc', access_token: 'test-token', secret: 'test-secret', apiKey: 'test-api-key',
+      password: 'test-password', auth: 'test-auth', credential: 'test-credential', security_code: '000',
+      expiry: '2030-01', pin: '0000', invoice: 'not a secret',
+      authorization_controls: { allowed_currencies: ['USD'] },
       note: `test-api-key test-client-id test-token ${'0'.repeat(16)}`, number: Number('1'.repeat(13)),
+      count: Number('1'.repeat(13)),
       array: [{ session_token: 'test-token', other: 'safe' }],
     } };
     const { client } = harness(() => json(body));
     const result = await client.createCard(input);
     expect(result.raw).toEqual({ card_id: 'card_test_01', nested: {
       card_number_masked: '****0000', masked_card_number: '123456******0000',
-      note: '[redacted] [redacted] [redacted] [redacted]', number: '[redacted]', array: [{ other: 'safe' }],
+      invoice: 'not a secret', authorization_controls: { allowed_currencies: ['USD'] },
+      note: '[redacted] [redacted] [redacted] [redacted]', count: '[redacted]', array: [{ other: 'safe' }],
     } });
     expect(result.unconfirmed).toBe(true);
+  });
+
+  it('redacts spaced and dashed PANs on createCard raw and getCard', async () => {
+    const spaced = '0000 0000 0000 0000';
+    const dashed = '0000-0000-0000-0000';
+    const body = { ...baseCard, card_number: spaced, masked_card_number: dashed, note: `ref ${spaced}`, reference: dashed };
+    const { client } = harness(() => json(body));
+    const created = await client.createCard(input);
+    expect(created.card).toEqual({ ...baseCard, panLikeValueDropped: true });
+    expect(created.raw).toEqual({ ...baseCard, masked_card_number: '[redacted]', note: 'ref [redacted]', reference: '[redacted]' });
+    expect(JSON.stringify(created)).not.toContain('0000');
+    expect(await client.getCard('card_test_01')).toEqual({ ...baseCard, panLikeValueDropped: true });
+    expect(JSON.stringify(await client.getCard('card_test_01'))).not.toContain('0000');
+  });
+
+  it('rejects a spaced PAN that only looks masked because it still has more than 12 digits', () => {
+    expect(cardSchema.safeParse({ ...baseCard, masked_card_number: `${'0'.repeat(12)}*` }).success).toBe(true);
+    expect(cardSchema.safeParse({ ...baseCard, masked_card_number: '0000 0000 0000 0000 x' }).success).toBe(false);
+    const dropped = cardSchema.safeParse({ ...baseCard, card_number: '0000 0000 0000 0000' });
+    expect(dropped.success).toBe(true);
+    if (dropped.success) expect(dropped.data).toEqual({ ...baseCard, panLikeValueDropped: true });
   });
 
   it('bounds diagnostic nesting without rejecting a successfully created card', async () => {
@@ -147,6 +177,48 @@ describe('card recovery', () => {
     expect(cardNicknameFromRequestId('request_test_01')).toBe('spk request_test_01');
     expect(cardNicknameFromRequestId('r'.repeat(80))).toHaveLength(50);
   });
+
+  it('reads data and results envelopes and stops when has_more is omitted on a short page', async () => {
+    const { client, calls } = harness(url => url.searchParams.get('page_num') === '0'
+      ? json({ data: Array.from({ length: 10 }, (_, index) => ({ card_id: `card_test_${String(index).padStart(2, '0')}`, card_status: 'ACTIVE' })) })
+      : json({ results: [{ card_id: 'card_test_10', card_status: 'ACTIVE' }] }));
+    const result = await client.listCards({ pageSize: 10 });
+    expect(result.items.map(card => card.card_id)).toEqual([
+      ...Array.from({ length: 10 }, (_, index) => `card_test_${String(index).padStart(2, '0')}`),
+      'card_test_10',
+    ]);
+    expect(calls.map(url => url.searchParams.get('page_num'))).toEqual(['0', '1']);
+  });
+
+  it('stops on an empty page even when has_more stays true', async () => {
+    const { client, calls } = harness(url => url.searchParams.get('page_num') === '0'
+      ? json({ has_more: true, items: [baseCard] })
+      : json({ has_more: true, items: [] }));
+    expect((await client.listCards()).items.map(card => card.card_id)).toEqual(['card_test_01']);
+    expect(calls.map(url => url.searchParams.get('page_num'))).toEqual(['0', '1']);
+  });
+
+  it('throws AirwallexSafetyError after 200 pages that still claim more results', async () => {
+    const { client, calls } = harness(() => json({ has_more: true, items: [baseCard] }));
+    const error = await client.listCards().catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(AirwallexSafetyError);
+    expect((error as Error).message).toBe('Card list page cap exceeded');
+    expect(calls).toHaveLength(200);
+  });
+
+  it('does not match a truncated nickname when two long request ids would collide', async () => {
+    const shared = 'r'.repeat(46);
+    const idA = `${shared}aaaa`;
+    const idB = `${shared}bbbb`;
+    expect(`spk ${idA}`.length).toBeGreaterThan(CARD_NICKNAME_MAX_LENGTH);
+    expect(cardNicknameFromRequestId(idA)).toBe(cardNicknameFromRequestId(idB));
+    const { client } = harness(() => json({ has_more: false, items: [
+      { card_id: 'card_test_01', request_id: idB, nick_name: cardNicknameFromRequestId(idB) },
+      { card_id: 'card_test_02', nick_name: cardNicknameFromRequestId(idA) },
+    ] }));
+    expect(await client.findCardByRequestId(idA)).toBeUndefined();
+    expect(await client.findCardByRequestId(idB)).toMatchObject({ card_id: 'card_test_01' });
+  });
 });
 
 describe('reconciliation response tolerance', () => {
@@ -157,10 +229,40 @@ describe('reconciliation response tolerance', () => {
     }] }));
     const result = await client.listTransactions();
     expect(result.unparsed).toEqual([]);
-    expect(result.items[0]).toMatchObject({ transaction_amount: amount, billing_amount: amount, merchant,
+    expect(result.items[0]).toMatchObject({ transaction_amount: amount, billing_amount: amount, signedAmount: amount, merchant,
       transaction_type: 'REFUND', status: 'SUCCEEDED', card_transaction_id: 'card_transaction_test_01',
       card_transaction_lifecycle_id: 'lifecycle_test_01', extra: { future: { value: 'safe', note: '[redacted]' } },
     });
+  });
+
+  it.each([
+    ['REFUND', '12.34', '-12.34'],
+    ['REVERSAL', 12.34, -12.34],
+    ['REFUND', '-1.00', '-1.00'],
+    ['REVERSAL', 0, 0],
+    ['AUTHORIZATION', '12.34', '12.34'],
+    ['refund', '12.34', '12.34'],
+  ] as const)('derives signedAmount for %s amount %s without rewriting transaction_amount', async (type, amount, signed) => {
+    const { client } = harness(() => json({ items: [{ ...baseTransaction, transaction_type: type, transaction_amount: amount }] }));
+    const item = (await client.listTransactions()).items[0];
+    expect(item?.transaction_amount).toBe(amount);
+    expect(item?.signedAmount).toBe(signed);
+  });
+
+  it('redacts spaced and dashed PANs in simulation extra and transaction extra', async () => {
+    const spaced = '0000 0000 0000 0000';
+    const dashed = '0000-0000-0000-0000';
+    const masked = `${spaced} x`;
+    const { client } = harness(url => url.pathname.endsWith('/simulation/issuing/create')
+      ? json({ process_result: 'APPROVED', note: spaced, reference: dashed, masked_card_number: masked })
+      : json({ items: [{ ...baseTransaction, note: spaced, reference: dashed, masked_card_number: masked }] }));
+    const simulation = await client.simulateAuthorization({ card_id: 'card_test_01', transaction_amount: '1.00',
+      transaction_currency: 'USD', merchant_category_code: '7372' });
+    expect(simulation.extra).toEqual({ note: '[redacted]', reference: '[redacted]', masked_card_number: '[redacted] x' });
+    expect(JSON.stringify(simulation)).not.toContain('0000');
+    const transaction = (await client.listTransactions()).items[0];
+    expect(transaction?.extra).toEqual({ note: '[redacted]', reference: '[redacted]', masked_card_number: '[redacted] x' });
+    expect(JSON.stringify(transaction)).not.toContain('0000');
   });
 
   it('keeps valid merchant fields when another field changes shape and retains nested unknowns', async () => {
@@ -204,13 +306,27 @@ describe('reconciliation response tolerance', () => {
   });
 });
 
+function sourceFiles(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === '__tests__') continue;
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...sourceFiles(path));
+    else if (entry.isFile() && !entry.name.includes('.test.') && !entry.name.includes('.spec.')) files.push(path);
+  }
+  return files;
+}
+
 it('contains no production-origin escape hatch in repository package source', () => {
-  const result = spawnSync('rg', ['-l', 'allowNonSandbox', 'packages', '-g', '*/src/**',
-    '-g', '!*.test.*', '-g', '!*.spec.*', '-g', '!**/__tests__/**'], {
-    cwd: new URL('../../../', import.meta.url), encoding: 'utf8',
-  });
-  expect(result.error).toBeUndefined();
-  expect(result.stderr).toBe('');
-  expect(result.stdout).toBe('');
-  expect(result.status).toBe(1);
+  const packagesDir = fileURLToPath(new URL('../../../packages/', import.meta.url));
+  const hits: string[] = [];
+  for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const srcDir = join(packagesDir, entry.name, 'src');
+    if (!existsSync(srcDir)) continue;
+    for (const file of sourceFiles(srcDir)) {
+      if (readFileSync(file, 'utf8').includes('allowNonSandbox')) hits.push(file);
+    }
+  }
+  expect(hits).toEqual([]);
 });

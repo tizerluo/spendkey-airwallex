@@ -77,19 +77,25 @@ body streams (`raw: { bodyReadFailed: true }`). No response-schema failure retri
 issuance or throws after a 2xx. Transport failures and non-2xx still throw.
 Persist the result's `raw` with the approval/request ID before continuing; the
 client returns evidence and does not write logs or storage itself. Raw diagnostics
-recursively drop keys matching `/pan|card_number(?!_masked)|cvv|cvc|token|secret|key/i`,
-except `masked_card_number`. Digit runs of 13 or more are replaced, including
-numeric values, and current/previous authentication tokens and runtime credentials
-are scrubbed. Consequently raw `card_number` is omitted even when masked; the
-parsed card may safely keep it.
+recursively drop keys matching
+`/pan|card_number(?!_masked)|cvv|cvc|token|secret|key|password|auth|credential|security_code|expir/i`,
+the whole key `pin`, and a `number` key whose value is digit-like.
+`masked_card_number` and `authorization_controls` are kept. Digit runs of 13 or
+more are replaced, including numeric values, as are 13–19 digit runs with a
+single space or dash between digits. Current and previous authentication tokens
+and runtime credentials are scrubbed. Consequently raw `card_number` is omitted
+even when masked; the parsed card may safely keep a mask of at most 12 digits.
 
 `listCards({ cardholderId?, createdAfter?, createdBefore?, updatedAfter?,
 updatedBefore?, status?, nickName?, pageSize? })` collects all pages into
 `{ items, unparsed }`. Individual unknown card formats retain redacted diagnostics.
 `findCardByRequestId(requestId, { cardholderId?, createdAfter? })` scans those pages,
 prefers a matching `request_id` when returned, and otherwise matches the exact
-`cardNicknameFromRequestId(requestId)` only on rows without a request ID. An
-explicit conflicting ID never matches by nickname. No match returns `undefined`.
+`cardNicknameFromRequestId(requestId)` only on rows without a request ID.
+If `spk ${requestId}` is longer than 50 characters, that nickname would be
+truncated, so recovery does not use it and returns only an explicit `request_id`
+match. An explicit conflicting ID never matches by nickname. No match returns
+`undefined`.
 The approval mapper sets that same nickname (`spk ${requestId}`), ignoring the
 legacy `nickName` option, so recovery works even if the API omits `request_id`.
 
@@ -98,7 +104,11 @@ Public documentation checked read-only on 2026-11-11:
 confirms `GET /api/v1/issuing/cards`, zero-based `page_num`, `page_size` 10–200
 (default 100), `cardholder_id`, exact-match `nick_name`, and inclusive
 `from_created_at`, `to_created_at`, `from_updated_at`, `to_updated_at`, plus
-`card_status`. Responses have `items` and `has_more`. There is no documented
+`card_status`. Responses normally have `items` and `has_more`. Recovery also
+accepts a `data` or `results` array when `items` is absent. A missing `has_more`
+stops once a page is empty or shorter than `pageSize`. An empty page stops even
+when `has_more` is true. More than 200 pages throws `AirwallexSafetyError`.
+There is no documented
 `request_id` query parameter or list-response field; if returned, we retain it.
 The endpoint defaults to a 30-day window unless **both** creation bounds are set.
 Recovery with `createdAfter` therefore also supplies the injected clock's current
@@ -120,7 +130,9 @@ transaction IDs, and redacted `extra` fields. Invalid rows go to `unparsed` with
 redaction; other rows and page metadata remain available. A usable row requires
 `transaction_id`, a signed decimal `transaction_amount`, and `transaction_currency`;
 other modeled fields may be absent. No assumption joins `transaction_id` to
-`card_transaction_id` until the live response confirms it. Refund/reversal signs
-are preserved, never inferred from a type label. Simulations keep both card
+`card_transaction_id` until the live response confirms it. `transaction_amount`
+keeps the API value and its original sign. `signedAmount` is derived from
+`transaction_type`: `REFUND` and `REVERSAL` with a positive API amount become
+negative, and every other row copies `transaction_amount`. Simulations keep both card
 transaction IDs and full merchant fields, tolerate future result strings and
 missing/invalid optional fields, and retain unknown fields in redacted `extra`.

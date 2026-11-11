@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { redactBody } from './redact.js';
+import { digitCount, hasMaskChar, isPanLike, redactBody } from './redact.js';
 
 /** Amounts retain the API's decimal string or JSON number; no numeric coercion. */
 export const amountSchema = z.union([z.string().regex(/^-?\d+(?:\.\d+)?$/), z.number().finite()]);
@@ -74,16 +74,18 @@ export const createCardInputSchema = z.object({
 export type CreateCardInput = z.input<typeof createCardInputSchema>;
 export const cardStatusSchema = z.enum(['ACTIVE', 'INACTIVE', 'CLOSED']);
 export type CardStatus = z.infer<typeof cardStatusSchema>;
-// Only masked card numbers are accepted; unknown response fields (including CVV) are stripped.
-const maskedNumberSchema = z.string().refine(value => /[*xX•●#]/.test(value) && !/\d{13,}/.test(value));
+// 只接受掩码卡号。数字总数不超过 12（BIN 可见掩码通常是 10 位），连续 13 位同样拒绝。
+const maskedNumberSchema = z.string().refine(value => hasMaskChar(value) && !/\d{13,}/.test(value) && digitCount(value) <= 12);
 
-/** Discard PAN-like values before validation, including on ordinary card reads. */
+/** 丢弃无掩码的卡号形态，并打上 panLikeValueDropped。带掩码字符的值留给 schema 决定。 */
 function dropPanLike(value: unknown): unknown {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
   const result = { ...value } as Record<string, unknown>;
   for (const key of ['card_number', 'masked_card_number']) {
     const number = result[key];
-    if ((typeof number === 'string' || typeof number === 'number') && /\d{13,}/.test(String(number))) {
+    if (typeof number !== 'string' && typeof number !== 'number') continue;
+    const text = String(number);
+    if (isPanLike(text) && !hasMaskChar(text)) {
       delete result[key];
       result['panLikeValueDropped'] = true;
     }
@@ -132,7 +134,16 @@ export interface ListCardsInput {
   pageSize?: number;
 }
 export interface CardsResponse { items: Card[]; unparsed: unknown[] }
-export const cardsPageSchema = z.object({ items: z.array(z.unknown()), has_more: z.boolean() });
+/** items 优先，其次 data、results。has_more 可以缺省。 */
+export const cardsPageSchema = z.object({
+  items: z.array(z.unknown()).optional(),
+  data: z.array(z.unknown()).optional(),
+  results: z.array(z.unknown()).optional(),
+  has_more: z.boolean().optional(),
+}).transform((page): { items: unknown[]; has_more: boolean | undefined } => ({
+  items: page.items ?? page.data ?? page.results ?? [],
+  has_more: page.has_more,
+}));
 export const cardLimitsSchema = z.object({
   currency: z.string(), limits: z.array(transactionLimitSchema.extend({ remaining: amountSchema })),
 });
@@ -176,6 +187,13 @@ export const simulationSchema = z.preprocess(dropPanLike, withExtra({
   network_transaction_id: z.string().optional().catch(undefined),
 }));
 export type SimulationResult = z.infer<typeof simulationSchema>;
+/** REFUND / REVERSAL 且 API 金额为正时取负；其余原样复制。不改写 transaction_amount。 */
+function signedAmountFor(type: string | undefined, amount: Amount): Amount {
+  if (type !== 'REFUND' && type !== 'REVERSAL') return amount;
+  if (typeof amount === 'number') return amount > 0 ? -amount : amount;
+  if (amount.startsWith('-') || Number(amount) <= 0) return amount;
+  return `-${amount}`;
+}
 export const transactionSchema = z.preprocess(dropPanLike, withExtra({
   transaction_id: z.string().min(1), card_id: z.string().optional(),
   transaction_type: z.string().optional(), status: z.string().optional(),
@@ -185,6 +203,9 @@ export const transactionSchema = z.preprocess(dropPanLike, withExtra({
   merchant: responseMerchantSchema.optional(), merchant_info: responseMerchantSchema.optional(),
   failure_reason: z.string().nullable().optional(), transaction_date: z.string().optional(),
   masked_card_number: maskedNumberSchema.optional().catch(undefined), panLikeValueDropped: z.literal(true).optional(),
+})).transform(transaction => ({
+  ...transaction,
+  signedAmount: signedAmountFor(transaction.transaction_type, transaction.transaction_amount),
 }));
 export type IssuingTransaction = z.infer<typeof transactionSchema>;
 export const transactionsSchema = z.object({
