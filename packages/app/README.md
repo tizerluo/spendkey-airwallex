@@ -209,3 +209,7 @@ M3-FE1-FIX：删掉复制哈希的内联脚本和按钮，导出 `CONSOLE_CSP`�
 断言改为检查芯片上的那句文案，并确认 `needsMcc` 为 false 时输出里没有 `merchantCategoryCode`。esbuild 的提示不是这次引入的，没有改构建脚本白名单。
 
 金额用十进制字符串按币种刻度拼接，不走浮点，多出来的非零小数直接抛错。页面模型从 `ApprovalRequest` 和账本记录生成，条款哈希调用 `@sk/policy` 的 `termsHash`，校验失败时只抛 `invalid_approval_request`。
+
+M4 operator API: `POST /approvals/:id/abandon` requires `X-Operator-Token` and the approval's `csrf`. It accepts only `failed` records with `attempted: true` and no card ID. A lookup by the original request ID must find no card; a found card is retained for `/recover`. Abandonment records `approval_rejected` with code `operator_abandoned`; restart the console to seed a fresh policy decision/request. Provider failures return `{ error, provider: { status, code, message, step } }` and redacted ledger evidence.
+
+M4 CLI APIs: `pnpm demo:sandbox --preflight` checks balances, issuing configuration and the existing cardholder without card mutations or local store writes. `pnpm demo:sandbox cleanup` confirms each stored demo card and freezes every non-INACTIVE card. A stale approval-store lock fails with its age; after confirming the owner stopped, remove `demo-output/sandbox/approvals.json.lock` and run cleanup before another demo. Neither sandbox command has been live verified.

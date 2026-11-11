@@ -13,7 +13,7 @@ it('runs the offline main line with exact ledger events, durable JSONL, controls
     const result = await runDemo({ now: () => new Date('2026-11-11T10:00:00.000Z'), outputDir: dir });
     expect(result.verification.ok).toBe(true); expect(result.tamperVerification.ok).toBe(false);
     expect(result.ledger.read().map(({ event }) => event.kind)).toEqual([
-      'offers_snapshot', 'comparison', 'decision', 'approval_requested', 'approval_granted', 'card_issued',
+      'run_started', 'offers_snapshot', 'comparison', 'decision', 'approval_requested', 'approval_granted', 'controls_readback', 'card_issued',
       'authorization', 'authorization', 'authorization', 'card_frozen', 'authorization',
       'authorization', 'authorization', 'authorization', 'authorization', 'raw_response', 'reconciliation',
     ]);
@@ -27,7 +27,17 @@ it('runs the offline main line with exact ledger events, durable JSONL, controls
     });
     expect([...result.fake.cards.values()][0]?.card_status).toBe('INACTIVE');
     expect(verifyJsonl(readFileSync(join(dir, 'ledger.jsonl'), 'utf8')).ok).toBe(true);
-    expect(result.transcript.join('\n')).toContain('OFFLINE sandbox simulation');
+    const transcript = result.transcript.join('\n');
+    expect(transcript).toContain('emulated (offline)');
+    expect(transcript.toLowerCase()).not.toContain('sandbox');
+    expect(transcript).toContain('Demo operator froze the card');
+    expect(transcript).toContain('reserve floor 500.00 USD');
+    expect(transcript).toContain('controls read back:'); expect(transcript).toContain('"amount":60');
+    expect(transcript).toContain('Ledger head: {"seq":');
+    expect(transcript).not.toContain('OPERATOR TOKEN'); expect(transcript).not.toContain('APPROVAL NONCE');
+    expect(result.ledger.read()[0]?.event).toMatchObject({ kind: 'run_started', mode: 'offline_emulator', policyNotes: [expect.stringContaining('reserve floor'), expect.any(String)] });
+    expect(result.ledger.read().filter(({ event }) => event.kind === 'controls_readback').map(({ event }) => event)).toMatchObject([{ matches: true }]);
+    expect(result.ledger.read().find(({ event }) => event.kind === 'card_frozen')?.event).toMatchObject({ by: 'human', reason: expect.stringMatching(/^demo-operator:/) });
     expect(result.fake.createCalls).toBe(1);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -49,7 +59,9 @@ it('uses a real-client transport injection and adapts the reserve scenario to a 
   const f = injectedSandbox('10000.00');
   const result = await runDemo({ client: f.client, now: f.now, cardholderId: 'cardholder_test_01', outputDir: false });
   expect(result.verification.ok).toBe(true); expect(f.fake.createCalls).toBe(1);
-  expect(result.ledger.read()[2]?.event).toMatchObject({ kind: 'decision', action: 'ask', chosenOfferId: 'curated-designco-team-monthly' });
+  expect(result.ledger.read()[0]?.event).toMatchObject({ kind: 'run_started', mode: 'sandbox', policyNotes: [expect.stringContaining('reserve floor = max'), expect.any(String)] });
+  expect(result.transcript.join('\n')).toContain('reserve floor 9500.00 USD');
+  expect(result.ledger.read()[3]?.event).toMatchObject({ kind: 'decision', action: 'ask', chosenOfferId: 'curated-designco-team-monthly' });
   expect([...f.fake.cards.values()][0]?.card_status).toBe('INACTIVE');
 });
 it('refuses insufficient sandbox USD funds before creating a card', async () => {

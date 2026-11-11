@@ -1,12 +1,13 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { approve, approvalRequestSchema, approvalToCardInput, termsHash, type ApprovalRequest } from '@sk/policy';
-import { cardRequestIdFromApproval, type AirwallexClient, type Card } from '@sk/airwallex';
+import { AirwallexApiError, cardRequestIdFromApproval, type AirwallexClient, type Card } from '@sk/airwallex';
 import { redactValue, type LedgerStore } from '@sk/ledger';
 import { canonicalize } from '@sr/core';
+import { TransactionLoop } from './transactions.js';
 import type { ApprovalRecord, ApprovalStore } from './store.js';
 
 export class ServiceError extends Error {
-  constructor(readonly code: string, readonly status = 400) { super(code); }
+  constructor(readonly code: string, readonly status = 400, readonly provider?: { status: number; code: string; message: string; step: string }) { super(code); }
 }
 export function digest(value: string): string { return createHash('sha256').update(value).digest('hex'); }
 export function equalSecret(a: string, b: string): boolean {
@@ -17,6 +18,7 @@ export interface ServiceOptions {
   cardholderId: string; now?: () => Date; printNonce?: (line: string) => void;
   printOperatorToken?: (line: string) => void;
   demoMode?: boolean;
+  sleep?: (ms: number) => Promise<void>;
 }
 export class ApprovalService {
   readonly now: () => Date;
@@ -26,7 +28,7 @@ export class ApprovalService {
     this.now = options.now ?? (() => new Date());
     const token = randomBytes(32).toString('hex');
     this.#operatorTokenHash = Buffer.from(digest(token), 'hex');
-    (options.printOperatorToken ?? console.log)(`OPERATOR TOKEN: ${token}`);
+    if (!options.demoMode) (options.printOperatorToken ?? console.log)(`OPERATOR TOKEN: ${token}`);
     // Restart invalidates old terminal nonces and makes pending requests reviewable again.
     for (const saved of options.store.list()) {
       const record = this.get(saved.request.approvalRequestId);
@@ -59,6 +61,7 @@ export class ApprovalService {
       throw new ServiceError('approval_expired');
     }
     if (Date.parse(request.expiresAt) - this.now().getTime() > 60 * 60_000) throw new ServiceError('approval_lifetime_exceeded');
+    this.#bindDecision(request);
     const existing = this.options.store.get(request.approvalRequestId);
     if (existing) {
       if (termsHash(existing.request) !== termsHash(request) || canonicalize(existing.request) !== canonicalize(request)) {
@@ -79,6 +82,52 @@ export class ApprovalService {
     }, this.now().toISOString());
     (this.options.printNonce ?? console.log)(`APPROVAL NONCE ${request.approvalRequestId}: ${nonce}`);
     return { id: request.approvalRequestId };
+  }
+  #bindDecision(request: ApprovalRequest): void {
+    const events = this.options.ledger.read();
+    const decisionIndex = events.map((row, index) => ({ ...row, index })).reverse().find(({ event, at }) => event.kind === 'decision'
+      && event.action === 'ask' && event.chosenOfferId === request.offerId
+      && Date.parse(at) >= Date.parse(request.createdAt) && Date.parse(at) < Date.parse(request.expiresAt)
+      && Date.parse(at) <= this.now().getTime())?.index ?? -1;
+    if (decisionIndex < 0) throw new ServiceError('decision_not_found', 409);
+    // Use the comparison and snapshot immediately preceding this decision, never a later unrelated row.
+    const prior = events.slice(0, decisionIndex).reverse();
+    const comparison = prior.find(({ event }) => event.kind === 'comparison');
+    const snapshot = prior.find(({ event }) => event.kind === 'offers_snapshot');
+    const candidate = comparison?.event.kind === 'comparison'
+      ? comparison.event.candidates.find(row => row.offerId === request.offerId) : undefined;
+    const offer = snapshot?.event.kind === 'offers_snapshot'
+      ? snapshot.event.offers.find(row => row.offerId === request.offerId) : undefined;
+    if (!candidate?.terms || !offer || candidate.rail !== 'card' || offer.rail !== 'card'
+      || candidate.perChargeMinor !== request.amountMinor || offer.priceStatus !== request.priceStatus
+      || Object.entries(candidate.terms).some(([key, value]) => request[key as keyof ApprovalRequest] !== value)
+      || candidate.terms.merchantCategoryCode !== request.merchantCategoryCode) {
+      throw new ServiceError('terms_not_from_decision', 409);
+    }
+  }
+  /** Record redacted provider metadata at the failing operation boundary. */
+  providerFailure(error: unknown, endpoint: string, step: string): never {
+    if (!(error instanceof AirwallexApiError)) throw error;
+    const body = redactValue({ code: error.code, message: error.message }) as { code: string; message: string };
+    this.options.ledger.append({ kind: 'raw_response', ref: randomUUID(), endpoint,
+      status: error.status, body }, this.now().toISOString());
+    throw new ServiceError('airwallex_api_error', 502, { status: error.status, ...body, step });
+  }
+  async abandon(id: string): Promise<void> {
+    if (this.#inflight.has(id)) throw new ServiceError('issuance_in_progress', 409);
+    const record = this.get(id);
+    if (record.status !== 'failed' || !record.attempted || record.card?.cardId || !record.input) {
+      throw new ServiceError('abandon_not_allowed', 409);
+    }
+    let found;
+    try { found = await this.options.client.findCardByRequestId(record.input.request_id, { cardholderId: record.input.cardholder_id }); }
+    catch (error) { this.providerFailure(error, '/api/v1/issuing/cards', 'abandon lookup'); }
+    if (found) {
+      record.card = { cardId: found.card_id }; this.options.store.save(record);
+      throw new ServiceError('card_exists_recover_required', 409);
+    }
+    record.status = 'rejected'; record.nonceHash = ''; this.options.store.save(record);
+    this.options.ledger.append({ kind: 'approval_rejected', approvalRequestId: id, code: 'operator_abandoned' }, this.now().toISOString());
   }
   checkCsrf(record: ApprovalRecord, csrf: string): void {
     if (!csrf || !equalSecret(csrf, record.csrf)) throw new ServiceError('csrf_required', 403);
@@ -124,6 +173,7 @@ export class ApprovalService {
     if (!record.attempted) throw new ServiceError('recovery_not_attempted', 409);
     return this.issue(id);
   }
+  async waitForIssuance(): Promise<void> { await Promise.allSettled([...this.#inflight.values()]); }
   issue(id: string): Promise<ApprovalRecord> {
     const pending = this.#inflight.get(id);
     if (pending) return pending;
@@ -145,11 +195,14 @@ export class ApprovalService {
     }
     this.#recordGrant(record);
     let card: Card | undefined = record.card?.cardId === undefined ? undefined : { card_id: record.card.cardId };
+    let endpoint = '/api/v1/issuing/cards';
+    let step = 'recovery lookup';
     try {
       if (record.attempted) {
         card = await this.options.client.findCardByRequestId(input.request_id, { cardholderId: input.cardholder_id }) ?? card;
       } else {
         record.status = 'issuing'; record.attempted = true; this.options.store.save(record);
+        endpoint = '/api/v1/issuing/cards/create'; step = 'issuance';
         const result = await this.options.client.createCard(input);
         card = result.card;
         // Persist even a partial ID immediately, including when later diagnostics/polling fail.
@@ -160,36 +213,64 @@ export class ApprovalService {
             requestId: input.request_id, reason: 'response_shape_unconfirmed', rawResponseRef: ref }, this.now().toISOString());
           this.options.ledger.append({ kind: 'raw_response', ref, endpoint: '/api/v1/issuing/cards/create',
             status: 200, body: redactValue(result.raw) }, this.now().toISOString());
+          endpoint = '/api/v1/issuing/cards'; step = 'recovery lookup';
           const recovered = await this.options.client.findCardByRequestId(input.request_id, { cardholderId: input.cardholder_id });
           card = recovered ?? card;
         }
       }
       if (!card) throw new ServiceError('card_issue_unconfirmed', 409);
       record.card = { cardId: card.card_id }; this.options.store.save(record);
-      // Bounded polling, no duplicate create on a slow activation or response failure.
-      for (let attempt = 0; attempt < 3; attempt++) {
-        card = await this.options.client.getCard(card.card_id);
+      endpoint = `/api/v1/issuing/cards/${card.card_id}`; step = 'activation';
+      // Initial read followed by bounded back-off; recovery never creates a second card.
+      const sleep = this.options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
+      card = await this.options.client.getCard(card.card_id);
+      for (const delay of [500, 1000, 2000, 4000]) {
         if (card.card_status === 'ACTIVE') break;
+        await sleep(delay);
+        card = await this.options.client.getCard(card.card_id);
       }
       if (card.card_status !== 'ACTIVE') throw new ServiceError('card_not_active', 409);
+      step = 'controls readback';
+      const actual = card.authorization_controls ?? {};
+      const matches = canonicalize(normalizeControls(input.authorization_controls)) === canonicalize(normalizeControls(actual));
+      this.options.ledger.append({ kind: 'controls_readback', cardId: card.card_id, matches,
+        expected: input.authorization_controls, actual: redactValue(actual) as Record<string, unknown> }, this.now().toISOString());
+      if (!matches) {
+        await new TransactionLoop(this).freeze(card.card_id, 'system', 'auto-freeze: controls mismatch');
+        throw new ServiceError('controls_mismatch', 409);
+      }
       record.card = { cardId: card.card_id, status: card.card_status,
         ...(card.card_number === undefined ? {} : { maskedNumber: card.card_number }) };
-      record.status = 'issued'; this.options.store.save(record);
       if (!this.options.ledger.read().some(({ event }) => event.kind === 'card_issued' && event.approvalId === approval.approvalId)) {
         this.options.ledger.append({ kind: 'card_issued', approvalId: approval.approvalId, requestId: input.request_id,
           cardId: card.card_id, cardStatus: card.card_status, controls: input.authorization_controls,
           ...(record.card.maskedNumber === undefined ? {} : { maskedNumber: record.card.maskedNumber }),
         }, this.now().toISOString());
       }
+      record.status = 'issued'; this.options.store.save(record);
       return record;
-    } catch {
+    } catch (error) {
+      // A system freeze can have persisted newer card state during this attempt.
+      const persisted = this.options.store.get(id);
+      if (persisted?.card) record.card = persisted.card;
       record.status = 'failed'; this.options.store.save(record);
       if (!this.options.ledger.read().some(({ event }) => event.kind === 'card_issue_unconfirmed' && event.approvalId === approval.approvalId)) {
         this.options.ledger.append({ kind: 'card_issue_unconfirmed',
           approvalId: approval.approvalId, requestId: input.request_id, reason: 'issuance_or_activation_unconfirmed',
         }, this.now().toISOString());
       }
+      if (error instanceof ServiceError) throw error;
+      if (error instanceof AirwallexApiError) this.providerFailure(error, endpoint, step);
       throw new ServiceError('card_issue_unconfirmed', 409);
     }
   }
+}
+
+/** Normalize decimal amounts and unordered API arrays without discarding unexpected controls. */
+export function normalizeControls(value: unknown, key = ''): unknown {
+  if (Array.isArray(value)) return value.map(item => normalizeControls(item, key)).sort((a, b) => canonicalize(a).localeCompare(canonicalize(b)));
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value)
+    .map(([name, item]) => [name, normalizeControls(item, name)]));
+  if (key === 'amount' && (typeof value === 'number' || typeof value === 'string') && Number.isFinite(Number(value))) return Number(value);
+  return value;
 }

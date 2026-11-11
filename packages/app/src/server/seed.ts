@@ -1,3 +1,4 @@
+import type { LedgerStore } from '@sk/ledger';
 import { runAgent } from '@sk/agent';
 import { createCuratedSource } from '@sk/offers';
 import type { ApprovalService } from './service.js';
@@ -14,4 +15,10 @@ export async function seedDesignCoRequest(service: ApprovalService): Promise<voi
       reserveFloorMinor: { USD: 50_000 }, budgetCurrency: 'USD', windowBudgetMinor: 100_000,
       maxCommitmentMonths: 12, billingCountry: 'US', cardCountry: 'US',
     } });
+}
+
+/** First appended event on every console process start, before recovery or seeding. */
+export function recordConsoleRun(ledger: LedgerStore, now = new Date()): void {
+  ledger.append({ kind: 'run_started', mode: 'console_sandbox',
+    policyNotes: ['reserve floor 500.00 USD must remain after upfront charges', 'known obligation 100.00 USD within 30 days'] }, now.toISOString());
 }

@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { approvalRequestSchema, termsHash, type Approval, type ApprovalRequest } from '@sk/policy';
 import { z } from 'zod';
 import type { CreateCardInput } from '@sk/airwallex';
@@ -45,13 +45,31 @@ export class MemoryApprovalStore implements ApprovalStore {
   close(): void { /* no resources */ }
 }
 
-/** One process owns the store for its lifetime. Fail closed on a stale lock; never replay issuance. */
+/** One process owns the store for its lifetime. Stale locks fail with actionable diagnostics. */
 export class JsonApprovalStore extends MemoryApprovalStore {
   readonly #lock: number;
   #closed = false;
   constructor(readonly path: string) {
     super();
-    this.#lock = openSync(`${path}.lock`, 'wx', 0o600);
+    const lockPath = `${path}.lock`;
+    try { this.#lock = openSync(lockPath, 'wx', 0o600); }
+    catch (error) {
+      if (!existsSync(lockPath)) throw error;
+      let alive = false;
+      let age = Date.now() - statSync(lockPath).mtimeMs;
+      try {
+        const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as { pid?: number; createdAt?: number };
+        if (typeof lock.createdAt === 'number' && Number.isFinite(lock.createdAt)) age = Date.now() - lock.createdAt;
+        if (Number.isSafeInteger(lock.pid) && lock.pid! > 0) {
+          try { process.kill(lock.pid!, 0); alive = true; }
+          catch (failure) { alive = (failure as NodeJS.ErrnoException).code !== 'ESRCH'; }
+        }
+      } catch { /* Old/invalid locks remain fail-closed and are reported as stale. */ }
+      throw new Error(alive ? 'approval_store_locked: owner process is alive'
+        : `approval_store_stale_lock: owner absent or unknown; age ${Math.max(0, Math.floor(age / 1000))}s; verify the owner stopped, remove approvals.json.lock, then run demo:sandbox cleanup`);
+    }
+    writeFileSync(this.#lock, JSON.stringify({ pid: process.pid, createdAt: Date.now() }));
+    fsyncSync(this.#lock);
     try {
       if (existsSync(path)) {
         const records: unknown = JSON.parse(readFileSync(path, 'utf8'));

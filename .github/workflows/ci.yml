@@ -17,6 +17,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify
+      - run: pnpm -s demo:offline
   gitleaks:
     runs-on: ubuntu-latest
     steps:

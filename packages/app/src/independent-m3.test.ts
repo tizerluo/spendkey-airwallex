@@ -1,3 +1,4 @@
+import { recordDecision } from './server/decision-fixture.test-support.js';
 import { createHash, createHmac } from 'node:crypto';
 import { request as httpRequest, type IncomingHttpHeaders, type Server } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -135,6 +136,7 @@ async function fixture() {
     printNonce: line => nonceLines.push(line), printOperatorToken: line => operatorLines.push(line) });
   const operatorToken = operatorLines[0]!.split(': ')[1]!;
   const request = approvalRequest();
+  recordDecision(ledger, request);
   await service.submit(request);
   const nonce = nonceLines[0]!.split(': ')[1]!;
   const csrf = service.get(request.approvalRequestId).csrf;

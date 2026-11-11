@@ -32,19 +32,28 @@ export async function runAgent({ intent, usage, ctx, sources, ledger, approvalSe
     offerId: candidate.offerId, rail: candidate.rail, price: prices.get(candidate.offerId)!, upfrontMinor: candidate.upfrontMinor,
     perChargeMinor: candidate.perChargeMinor, horizonLowMinor: candidate.horizonCost.lowMinor,
     horizonHighMinor: candidate.horizonCost.highMinor, notes: candidate.notes,
+    ...(candidate.rail === 'card' ? { terms: {
+      vendor: candidate.vendor, product: candidate.product, plan: candidate.plan, currency: candidate.currency,
+      amountMinor: candidate.perChargeMinor,
+      interval: candidate.plan === 'monthly' || candidate.plan === 'usage' ? 'MONTHLY' as const : 'PER_TRANSACTION' as const,
+      allowedTransactionCount: candidate.plan === 'annual' || candidate.plan === 'one_time' ? 'SINGLE' as const : 'MULTIPLE' as const,
+      ...(candidate.merchantCategoryCode === undefined ? {} : { merchantCategoryCode: candidate.merchantCategoryCode }),
+      commitmentMonths: candidate.commitmentMonths, priceStatus: candidate.priceStatus,
+    } } : {}),
   })), excluded: comparison.excluded }, now.toISOString());
   const decision = decidePurchase(comparison.candidates, {
     ...ctx, balances: await ctx.balanceProvider(), spentInWindowMinor: await ctx.spentInWindowMinor(),
   });
+  const decisionAt = ctx.now?.() ?? new Date();
   ledger.append({ kind: 'decision', action: decision.action,
     ...(decision.chosen === undefined ? {} : { chosenOfferId: decision.chosen.offerId }),
     reasons: decision.reasons, ruleResults: decision.ranked.flatMap(({ candidate, results }) =>
       results.map(({ rule, pass, code }) => ({ offerId: candidate.offerId, rule, pass, code }))),
-  }, now.toISOString());
+  }, decisionAt.toISOString());
   if (decision.action !== 'ask' || decision.chosen === undefined) return { decision, errors };
   const request = createApprovalRequest(decision.chosen, {
-    approvalRequestId: randomUUID(), createdAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString(),
+    approvalRequestId: randomUUID(), createdAt: decisionAt.toISOString(),
+    expiresAt: new Date(decisionAt.getTime() + 15 * 60_000).toISOString(),
   });
   const submitted = await approvalService.submit(request);
   return { decision, errors, request, approvalRequestId: submitted.id };

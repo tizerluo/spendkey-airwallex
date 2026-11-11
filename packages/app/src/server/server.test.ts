@@ -11,6 +11,7 @@ import { CONSOLE_CSP } from '../views/html.js';
 import { createFakeAirwallex } from '../demo/fake-airwallex.js';
 import { demoContext } from '../demo/run.js';
 import { createConsoleServer } from './http.js';
+import { recordDecision } from './decision-fixture.test-support.js';
 import { ApprovalService, digest } from './service.js';
 import { seedDesignCoRequest } from './seed.js';
 import { JsonApprovalStore, MemoryApprovalStore, type ApprovalStore } from './store.js';
@@ -34,6 +35,7 @@ async function fixture(options: { unconfirmedCreate?: boolean; store?: ApprovalS
     printOperatorToken: line => operatorLines.push(line) });
   const operatorToken = operatorLines[0]!.split(': ')[1]!;
   const request = approvalRequest(); if (options.noMcc) delete request.merchantCategoryCode;
+  recordDecision(ledger, request);
   const submitted = await service.submit(request);
   const nonce = printed[0]!.split(': ')[1]!;
   const fields = { nonce, csrf: service.get(submitted.id).csrf, presentedTermsHash: termsHash(request),
@@ -113,7 +115,7 @@ describe('durable approval state machine', () => {
     expect(result.status).toBe('issued'); expect(result.approval?.approvalId).toBe(stored.approval!.approvalId);
     expect(result.input?.request_id).toBe(stored.input!.request_id); expect(f.fake.createCalls).toBe(1);
     expect(f.ledger.read().map(({ event }) => event.kind)).toEqual([
-      'approval_requested', 'approval_granted', 'card_issue_unconfirmed', 'raw_response', 'card_issued',
+      'offers_snapshot', 'comparison', 'decision', 'approval_requested', 'approval_granted', 'card_issue_unconfirmed', 'raw_response', 'controls_readback', 'card_issued',
     ]);
     expect(verifyChain(f.ledger.read()).ok).toBe(true);
     const raw = f.ledger.read().find(({ event }) => event.kind === 'raw_response')!.event;

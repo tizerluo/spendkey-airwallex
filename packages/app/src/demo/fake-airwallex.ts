@@ -19,6 +19,7 @@ export function createFakeAirwallex(options: { now?: () => Date; unconfirmedCrea
       currency: 'USD', available_amount: '1000.00', pending_amount: '0.00', reserved_amount: '0.00',
       total_amount: '1000.00', prepayment_amount: '0.00', account_type: 'WALLET',
     }]);
+    if (path === '/api/v1/issuing/cardholders/cardholder_test_01') return json({ cardholder_id: 'cardholder_test_01', status: 'ACTIVE' });
     if (path === '/api/v1/issuing/config') return json({ primary_currency: 'USD' });
     if (path === '/api/v1/issuing/cards/create') {
       createCalls++;
