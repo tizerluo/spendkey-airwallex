@@ -9,9 +9,15 @@ function hashRecord(record: Omit<LedgerEvent, 'hash'>): string {
   return `0x${sha256Hex(canonicalize(record))}`;
 }
 
+/** 按时间点比较，相等允许；带偏移的同一时刻不算回退。 */
+function earlierInstant(at: string, previous: string): boolean {
+  return Date.parse(at) < Date.parse(previous);
+}
+
 /** Zero-based sequence and brokenAt index. Does not mutate the input chain. */
 export function verifyChain(events: readonly unknown[]): ChainVerification {
   let prevHash = ZERO_HASH;
+  let previousAt: string | undefined;
   for (let index = 0; index < events.length; index += 1) {
     const input = events[index];
     const parsed = LedgerEventSchema.safeParse(input);
@@ -21,11 +27,15 @@ export function verifyChain(events: readonly unknown[]): ChainVerification {
     catch { return { ok: false, brokenAt: index, error: 'unsafe_ledger_event' }; }
     if (record.seq !== index) return { ok: false, brokenAt: index, error: 'invalid_sequence' };
     if (record.prevHash !== prevHash) return { ok: false, brokenAt: index, error: 'previous_hash_mismatch' };
+    if (previousAt !== undefined && earlierInstant(record.at, previousAt)) {
+      return { ok: false, brokenAt: index, error: 'non_monotonic_timestamp' };
+    }
     const { hash, ...payload } = record;
     if (hash !== hashRecord(payload as Omit<LedgerEvent, 'hash'>)) {
       return { ok: false, brokenAt: index, error: 'hash_mismatch' };
     }
     prevHash = hash;
+    previousAt = record.at;
   }
   return { ok: true };
 }
@@ -38,13 +48,14 @@ export function assertValidChain(events: readonly unknown[]): void {
 /** Build a detached record after validating both history and the new event. */
 export function appendEvent(events: readonly LedgerEvent[], event: CardAuditEvent, at = new Date().toISOString()): LedgerEvent {
   assertValidChain(events);
-  // Sanitize only the tolerant payloads; preserve all other properties so the
-  // final guard can catch unknown secret-bearing fields before schema parsing.
-  event = event.kind === 'raw_response' ? { ...event, body: redactValue(event.body) }
-    : event.kind === 'card_issued' ? { ...event, controls: redactValue(event.controls) } : event;
-  assertRedacted(event);
-  if (!CardAuditEventSchema.safeParse(event).success) throw new Error('invalid_card_audit_event');
-  const snapshot = JSON.parse(JSON.stringify(event)) as CardAuditEvent;
+  const previousAt = events.at(-1)?.at;
+  if (previousAt !== undefined && earlierInstant(at, previousAt)) throw new Error('non_monotonic_timestamp');
+  // 先整条脱敏再守卫：普通文案保留，高置信度形态变成 [REDACTED]，敏感键删除。
+  // 哈希覆盖的是存储后的脱敏事件，而不是调用方传入的原文。
+  const sanitized: unknown = redactValue(event);
+  assertRedacted(sanitized);
+  if (!CardAuditEventSchema.safeParse(sanitized).success) throw new Error('invalid_card_audit_event');
+  const snapshot = JSON.parse(JSON.stringify(sanitized)) as CardAuditEvent;
   if (!CardAuditEventSchema.safeParse(snapshot).success) throw new Error('invalid_card_audit_event');
   const payload = { seq: events.length, at, prevHash: events.at(-1)?.hash ?? ZERO_HASH, event: snapshot };
   const record = { ...payload, hash: hashRecord(payload) };

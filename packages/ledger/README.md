@@ -52,8 +52,11 @@ The first `prevHash` is `ZERO_HASH` from `@sr/core`. Hashes are
 `'0x' + sha256Hex(canonicalize({ seq, at, prevHash, event }))`, using the core
 canonicalizer. `verifyChain(events)` returns `{ ok: true }` or
 `{ ok: false, brokenAt, error }`; `brokenAt` is the zero-based index of the
-first invalid record. It checks schema, redaction, sequence, predecessor and
-digest. It accepts an empty chain.
+first invalid record. It checks schema, redaction, sequence, predecessor,
+timestamp order and digest. A record whose instant is earlier than the previous
+record fails with `non_monotonic_timestamp`. Equal instants are allowed,
+including the same moment written with a different offset. It accepts an empty
+chain.
 
 The file store verifies on open and rereads/verifies before each append. It
 opens with `O_APPEND`, writes one compact JSON object and a newline, and calls
@@ -70,8 +73,11 @@ for up to 200ms, then throws `ledger_lock_unavailable`. A dead owner or a lock
 older than 30 seconds permits stale-lock recovery. Operations must complete
 within that lease. Ledger and lock paths must be on a trusted local filesystem;
 external replacement or truncation is outside this coordination protocol.
-Cleanup attempts both close and unlink and preserves the original operation
-error if cleanup also fails. History is never repaired or truncated.
+Cleanup attempts both close and unlink. If the operation failed, that error is
+preserved. If the operation succeeded and cleanup failed, the result is still
+returned so a committed append is not retried as a failure. A leftover lock is
+recovered when its owner is dead or the lock is older than 30 seconds. History
+is never repaired or truncated.
 
 A chain detects modified lines, reordering, duplicates and deletion before a
 retained successor. Deleting a complete suffix leaves a valid shorter chain;
@@ -79,23 +85,29 @@ detecting that requires retaining the previous head hash/count independently.
 Likewise, an attacker who can rewrite the whole file can recompute its hashes.
 This is an integrity chain, not a signature or external checkpoint service.
 
-`redactValue(value)` deep clones response data, drops sensitive keys, and replaces
-flagged strings (or numeric PANs) with `"[REDACTED]"`. It retains
-`masked_card_number`, checking the value for unmasked PANs. Sensitive keys include
-PAN/card number, CVV/CVC, tokens, secrets, passwords, authorization, cookies, API
-keys and private keys. Values are checked for standalone 13–19 digit PAN groups
-with a Luhn checksum, Basic/bearer credentials, JWTs and common
-secret indicators/shapes. Hex hashes, UUIDs, ISO timestamps, epoch-ms values and
-`spk_` request IDs are accepted. Unlabelled credentials cannot all be recognized.
+`redactValue(value)` deep clones JSON, drops sensitive keys, and replaces
+high-confidence secret shapes with `"[REDACTED]"`. It retains the key
+`masked_card_number`, but still checks that value for an unmasked PAN. Sensitive
+keys (and only keys) include CVV/CVC, PAN, card number, security code, card
+security or card expiry, a bare `number` key, tokens, secrets, passwords,
+authorization, cookies, API keys and private keys. Free-text values are not
+matched against those words, so merchant names, decline reasons, notes, intent
+and rule codes stay intact. Values are flagged only for high-confidence shapes:
+a standalone 13–19 digit PAN that passes Luhn (spaces or dashes allowed), JWTs,
+`sk-` / `sk_live_` / `sk_test_` keys, `AKIA`, `gh*_` and `xox*` tokens,
+`Bearer <token>`, `Basic <base64>` and PEM private keys. Hex hashes, UUIDs,
+ISO timestamps, epoch-ms values and `spk_` request IDs are accepted. A
+`spk_` plus 40 hex characters is 44 characters, within the 50-character
+request-id limit. Unlabelled credentials cannot all be recognized.
 
-Append automatically sanitizes `raw_response.body` and `card_issued.controls`,
-then runs `assertRedacted` as a final fail-closed guard on the entire event before
-validation or writing. Other fields and unknown properties remain guarded.
-Callers must use `redactValue` for tolerant handling of response-derived optional
-card fields before building an issuance event. Never copy exception messages or
-raw response text into an unconfirmed reason. If a response cannot be confirmed,
-append `card_issue_unconfirmed` with a fixed reason such as
-`response_shape_unconfirmed` and the safe reference to the stored raw response:
+`append` runs `redactValue` on the whole event, then `assertRedacted` with the
+same rules, then validates the schema. The record hash covers the stored
+sanitized event. Ordinary wording is stored verbatim. A high-confidence value
+becomes `"[REDACTED]"` and the event is still stored. A sensitive key is removed.
+Unknown properties that remain after that still fail the strict schema and are
+not written. If a response cannot be confirmed, append `card_issue_unconfirmed`
+with a fixed reason such as `response_shape_unconfirmed` and the safe reference
+to the stored raw response:
 
 ```ts
 import { redactValue } from '@sk/ledger';
