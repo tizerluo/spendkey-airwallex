@@ -14,6 +14,7 @@ export interface VerifyWebhookSignatureInput {
 export function verifyWebhookSignature({
   rawBody, timestamp, signature, secret, nowMs = Date.now(), toleranceMs = 300_000,
 }: VerifyWebhookSignatureInput): boolean {
+  if (!secret.trim()) return false;
   const expected = createHmac('sha256', secret).update(timestamp).update(rawBody).digest();
   if (!/^[0-9a-fA-F]{64}$/.test(signature)) return false;
   const received = Buffer.from(signature, 'hex');

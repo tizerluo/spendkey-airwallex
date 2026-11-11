@@ -38,13 +38,19 @@ function controlsForRequest(input: AuthorizationControls) {
 /** Defense in depth: card PAN/CVV details paths must never reach fetch. */
 export function assertSafeCardPath(path: string): void {
   let decoded = path;
-  for (let i = 0; i < 5; i++) {
+  let stable = false;
+  // Bound decoding work, but never inspect a partially decoded path as safe.
+  for (let i = 0; i < 16; i++) {
     let next: string;
     try { next = decodeURIComponent(decoded); }
     catch { throw new AirwallexSafetyError('Invalid API path'); }
-    if (next === decoded) break;
+    if (next === decoded) {
+      stable = true;
+      break;
+    }
     decoded = next;
   }
+  if (!stable || decoded.includes('%')) throw new AirwallexSafetyError('Invalid API path');
   decoded = decoded.replaceAll('\\', '/').toLowerCase();
   if (/\/issuing\/cards(?:\/|$)/.test(decoded) && decoded.includes('/details')) {
     throw new AirwallexSafetyError('Card details access is forbidden');

@@ -946,12 +946,15 @@ describe('independent: card details containment', () => {
       'AirwallexResponseError',
       'AirwallexSafetyError',
       'ISSUING_EVENT_NAMES',
+      'VERIFIED_ISSUING_EVENT_NAMES',
       'amountSchema',
       'assertSafeCardPath',
+      'authorizationControlsInputSchema',
       'authorizationControlsSchema',
       'balanceSchema',
       'balancesSchema',
       'cardLimitsSchema',
+      'cardRequestIdFromApproval',
       'cardSchema',
       'cardStatusSchema',
       'cardholderInputSchema',
@@ -964,6 +967,7 @@ describe('independent: card details containment', () => {
       'mapFailureReason',
       'merchantInfoSchema',
       'parseWebhookEvent',
+      'requestAmountSchema',
       'simulationInputSchema',
       'simulationSchema',
       'transactionLimitSchema',
@@ -1307,12 +1311,8 @@ describe('independent: response hardening', () => {
   });
 });
 
-describe('independent: known defects', () => {
-  // BUG: #redact only knows the current session token, so an API error that echoes the
-  // token from before the 401 re-login leaves that superseded bearer token in
-  // error.message. The client holds one session slot and overwrites it on re-login,
-  // so any token handed to fetch is unredactable once replaced.
-  it.fails('redacts a superseded token echoed after an automatic re-login', async () => {
+describe('independent: safety regressions', () => {
+  it('redacts a superseded token echoed after an automatic re-login', async () => {
     const h = makeHarness({
       'GET /api/v1/balances/current': (_call, attempt) => attempt === 1
         ? json({ code: 'TOKEN_EXPIRED', message: 'Expired' }, 401)
@@ -1324,11 +1324,7 @@ describe('independent: known defects', () => {
     expectNoMarker(error, 'independent-token-01');
   });
 
-  // BUG: assertSafeCardPath decodes at most five times, so a card id carrying a
-  // sixth-or-deeper percent-encoded "/details" (e.g. "%25252525252Fdetails") passes the
-  // guard. Whether that reaches a real details endpoint depends on server-side decoding,
-  // but the defense-in-depth promise in client.ts is not kept.
-  it.fails('blocks a details path nested beyond five encoding layers', () => {
+  it('blocks a details path nested beyond five encoding layers', () => {
     let encoded = '/details';
     for (let depth = 0; depth < 6; depth += 1) encoded = encodeURIComponent(encoded);
     expect(() => assertSafeCardPath(`/api/v1/issuing/cards/card_test_01${encoded}`)).toThrow(
@@ -1336,12 +1332,36 @@ describe('independent: known defects', () => {
     );
   });
 
-  // BUG: verifyWebhookSignature accepts an empty or whitespace-only secret, so an
-  // HMAC computed with a blank key verifies as genuine. A misconfigured deployment
-  // silently accepts forged webhooks rather than failing closed.
-  it.fails('rejects an empty webhook secret', () => {
+  it.each([16, 17, 64])('rejects a path not proven stable within the cap at %i layers', depth => {
+    let encoded = '/limits';
+    for (let layer = 0; layer < depth; layer += 1) encoded = encodeURIComponent(encoded);
+    expect(() => assertSafeCardPath(`/api/v1/issuing/cards/card_test_01${encoded}`)).toThrow(
+      AirwallexSafetyError,
+    );
+  });
+
+  it('allows a safe path that stabilizes just within the decoding cap', () => {
+    let encoded = '/limits';
+    for (let depth = 0; depth < 15; depth += 1) encoded = encodeURIComponent(encoded);
+    expect(() => assertSafeCardPath(`/api/v1/issuing/cards/card_test_01${encoded}`)).not.toThrow();
+  });
+
+  it('rejects an encoded percent that becomes undecodable', () => {
+    expect(() => assertSafeCardPath('/api/v1/issuing/cards/card_test_01%2525')).toThrow(
+      AirwallexSafetyError,
+    );
+  });
+
+  it.each(['', '   ', '\t\r\n', '\u00a0'])('rejects a blank webhook secret %j', secret => {
     const timestamp = String(WEBHOOK_NOW);
-    const signature = createHmac('sha256', '').update(timestamp).update(webhookBody).digest('hex');
-    expect(verifyWebhook({ signature, secret: '' })).toBe(false);
+    const signature = createHmac('sha256', secret).update(timestamp).update(webhookBody).digest('hex');
+    expect(verifyWebhook({ signature, secret })).toBe(false);
+  });
+
+  it('uses the original nonblank webhook secret including surrounding whitespace', () => {
+    const secret = ' test-webhook-secret ';
+    const timestamp = String(WEBHOOK_NOW);
+    const signature = createHmac('sha256', secret).update(timestamp).update(webhookBody).digest('hex');
+    expect(verifyWebhook({ signature, secret })).toBe(true);
   });
 });
