@@ -1,0 +1,19 @@
+{
+  "name": "@sk/app",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Server-rendered Spendkey console views for approval, audit, and the approval index",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  }
+}

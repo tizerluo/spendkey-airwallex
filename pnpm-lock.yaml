@@ -36,6 +36,8 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
 
+  packages/app: {}
+
   packages/compare:
     dependencies:
       '@sk/offers':
