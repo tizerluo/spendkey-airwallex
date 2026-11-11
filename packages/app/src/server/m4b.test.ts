@@ -1,15 +1,16 @@
-import { request as httpRequest, type Server } from 'node:http';
+import { request as httpRequest, type Server, type ServerResponse } from 'node:http';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadAirwallexConfig } from '@sk/airwallex';
-import { InMemoryLedgerStore, verifyJsonl } from '@sk/ledger';
+import { InMemoryLedgerStore, openJsonlLedger, verifyJsonl } from '@sk/ledger';
 import { termsHash } from '@sk/policy';
 import { createFakeAirwallex } from '../demo/fake-airwallex.js';
 import { DEMO_POLICY_NOTES, demoReserveFloorMinor } from '../demo/policy.js';
 import { runDemo } from '../demo/run.js';
 import { createAppAirwallexClient } from './airwallex-client.js';
+import { createConsoleServer } from './http.js';
 import { startOfflineConsole } from './offline.js';
 import { recordConsoleRun, seedDesignCoRequest } from './seed.js';
 import { ApprovalService, controlsMatch } from './service.js';
@@ -89,6 +90,7 @@ describe('offline console video fallback', () => {
       expect(audit.text).toContain('emulated (offline)'); expect(audit.text.toLowerCase()).not.toContain('sandbox');
       expect(audit.text).toContain('card_inactive');
       const jsonl = readFileSync(app.ledgerPath, 'utf8');
+      expect(await send(app.url, '/audit.jsonl')).toEqual({ status: 200, text: jsonl });
       expect(verifyJsonl(jsonl).ok).toBe(true);
       expect(jsonl).not.toContain(nonce); expect(jsonl).not.toContain(token);
       expect(app.service.options.ledger.read()[0]?.event).toEqual({ kind: 'run_started', mode: 'offline_emulator', policyNotes: DEMO_POLICY_NOTES });
@@ -100,9 +102,16 @@ describe('offline console video fallback', () => {
       const first = JSON.parse(rows[0]!) as { event: { policyNotes: string[] } };
       first.event.policyNotes[0] += ' (edited)'; rows[0] = JSON.stringify(first);
       writeFileSync(app.ledgerPath, rows.join('\n') + '\n');
+      const refused = await send(app.url, '/audit.jsonl');
+      expect(refused.status).toBe(409);
+      expect(JSON.parse(refused.text)).toEqual({ error: 'ledger_unverified' });
+      const indexAfterTamper = await send(app.url, '/');
+      expect(indexAfterTamper.status).toBe(400);
+      expect(JSON.parse(indexAfterTamper.text)).toEqual({ error: 'request_failed' });
       const broken = await send(app.url, '/audit');
       expect(broken.status).toBe(200); expect(broken.text).toContain('Chain BROKEN');
       expect(broken.text).toContain('hash_mismatch');
+      expect(broken.text).toContain('(edited)');
       // A broken file is diagnostic only; the normal store must still refuse writes.
       expect((await send(app.url, `${cardPath}/simulate`, operator, token)).status).not.toBe(200);
       expect(globalFetch).not.toHaveBeenCalled();
@@ -123,6 +132,83 @@ describe('offline console video fallback', () => {
         expect(second.service.options.store.list()[0]?.status).toBe('requested');
       } finally { await close(second.server); }
     } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('live console audit export with an offline transport', () => {
+  it.each(['tampered', 'malformed', 'partial'] as const)('refuses a %s ledger export and keeps serving requests', async damage => {
+    const globalFetch = vi.spyOn(globalThis, 'fetch');
+    const root = mkdtempSync(join(tmpdir(), 'spendkey-live-audit-'));
+    const ledgerPath = join(root, 'ledger.jsonl');
+    const ledger = openJsonlLedger(ledgerPath);
+    const fake = createFakeAirwallex({ now });
+    const service = new ApprovalService({
+      client: createAppAirwallexClient(config(), fake.fetch), ledger, store: new MemoryApprovalStore(), now,
+      cardholderId: 'cardholder_test_01', printNonce: () => {}, printOperatorToken: () => {},
+    });
+    const server = createConsoleServer(service, { auditFile: ledgerPath });
+    try {
+      recordConsoleRun(ledger, now());
+      await seedDesignCoRequest(service);
+      await new Promise<void>(accept => server.listen(0, '127.0.0.1', accept));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('test_listen_failed');
+      const url = `http://127.0.0.1:${address.port}`;
+      const jsonl = readFileSync(ledgerPath, 'utf8');
+      expect(await send(url, '/audit.jsonl')).toEqual({ status: 200, text: jsonl });
+      expect((await send(url, '/')).status).toBe(200);
+      expect((await send(url, '/audit')).text).toContain('Chain valid');
+      const rows = jsonl.trimEnd().split('\n');
+      if (damage === 'tampered') {
+        // Same single-line policy-note edit as the README video instructions.
+        const first = JSON.parse(rows[0]!) as { event: { policyNotes: string[] } };
+        first.event.policyNotes[0] += ' (edited)'; rows[0] = JSON.stringify(first);
+        writeFileSync(ledgerPath, rows.join('\n') + '\n');
+      } else if (damage === 'malformed') {
+        rows[0] = '{invalid-test-json';
+        writeFileSync(ledgerPath, rows.join('\n') + '\n');
+      } else writeFileSync(ledgerPath, jsonl.slice(0, -1));
+      const refused = await send(url, '/audit.jsonl');
+      expect(refused.status).toBe(409);
+      expect(JSON.parse(refused.text)).toEqual({ error: 'ledger_unverified' });
+      const index = await send(url, '/');
+      expect(index.status).toBe(400);
+      expect(JSON.parse(index.text)).toEqual({ error: 'request_failed' });
+      const audit = await send(url, '/audit');
+      expect(audit.status).toBe(200);
+      expect(audit.text).toContain('Chain BROKEN');
+      expect(audit.text).toContain(damage === 'tampered' ? 'hash_mismatch'
+        : damage === 'malformed' ? 'invalid_json' : 'incomplete_final_line');
+      expect(globalFetch).not.toHaveBeenCalled();
+    } finally {
+      if (server.listening) await close(server);
+      ledger.close(); rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('destroys an already-started response on error without sending headers twice', async () => {
+    const fake = createFakeAirwallex({ now });
+    const service = new ApprovalService({
+      client: createAppAirwallexClient(config(), fake.fetch), ledger: new InMemoryLedgerStore(),
+      store: new MemoryApprovalStore(), now, cardholderId: 'cardholder_test_01', printOperatorToken: () => {},
+    });
+    const server = createConsoleServer(service);
+    let startedResponse: ServerResponse | undefined;
+    server.prependOnceListener('request', (_request, response) => {
+      startedResponse = response;
+      vi.spyOn(response, 'end').mockImplementationOnce(() => { throw new Error('test_after_headers'); });
+    });
+    try {
+      await new Promise<void>(accept => server.listen(0, '127.0.0.1', accept));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('test_listen_failed');
+      const url = `http://127.0.0.1:${address.port}`;
+      await expect(send(url, '/audit.jsonl')).rejects.toThrow();
+      expect(startedResponse?.headersSent).toBe(true);
+      expect(startedResponse?.destroyed).toBe(true);
+      expect((await send(url, '/')).status).toBe(200);
+      expect((await send(url, '/audit')).status).toBe(200);
+    } finally { if (server.listening) await close(server); service.options.ledger.close(); }
   });
 });
 

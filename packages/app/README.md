@@ -61,7 +61,13 @@ For the fallback video:
 
 6. Refresh `/audit`: it shows “Chain BROKEN” and `hash_mismatch`. The read-only
    audit route diagnoses the on-disk file; normal ledger reads and writes still
-   reject a broken chain. Restart `pnpm console:offline` for a fresh recording.
+   reject a broken chain. In both consoles, `/audit.jsonl` builds and verifies
+   the full export before sending headers. If the ledger cannot be verified
+   (including a broken chain or malformed file), it returns HTTP 409 with
+   `{"error":"ledger_unverified"}` instead of exporting unverified events.
+   The server remains available: `/audit` shows diagnostics, while `/` returns
+   HTTP 400 `{"error":"request_failed"}` for a broken chain.
+   Restart `pnpm console:offline` for a fresh recording.
    Publish the original head hash outside the file when demonstrating anchored
    verification; recomputing all hashes can otherwise hide an edit.
 
@@ -284,10 +290,11 @@ throwing stub. These tests never call it. Fixture values are synthetic
 
 Controls readback compares only the keys sent in the card request, recursively.
 Decimal amount strings and numbers compare numerically, arrays compare as sets,
-and object key order is irrelevant. Provider additions (including nested
+and object key order is irrelevant. Extra provider keys (including nested
 `remaining` values, validity dates, defaults and nulls) do not change the match
-decision. Every sent key must still be present and equal; a missing MCC list or
-a changed limit fails closed, auto-freezes the card, and records
+decision. Extra array members (limits, MCCs or currencies) still fail closed
+and auto-freeze the card. Every sent key must still be present and equal;
+a missing MCC list or a changed limit fails closed, auto-freezes the card, and records
 `controls_mismatch`. The app's injected transport adapter keeps the raw controls
 object separately from validated card metadata so provider extras are preserved
 and missing sent controls can be recorded as mismatches. `controls_readback`

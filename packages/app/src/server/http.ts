@@ -31,6 +31,7 @@ function fields(body: Buffer, contentType: string): Record<string, unknown> {
 }
 function stringField(input: Record<string, unknown>, name: string): string { return typeof input[name] === 'string' ? input[name] : ''; }
 function respond(response: ServerResponse, status: number, body: string, html = false): void {
+  if (response.headersSent) { response.destroy(); return; }
   response.writeHead(status, { 'Content-Type': html ? 'text/html; charset=utf-8' : 'application/json; charset=utf-8',
     'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store',
     ...(html ? { 'Content-Security-Policy': CONSOLE_CSP } : {}),
@@ -77,9 +78,12 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
         respond(response, 200, renderAuditPage(model), true); return;
       }
       if (method === 'GET' && path === '/audit.jsonl') {
+        let body: string;
+        try { body = ledger.read().map(event => JSON.stringify(event) + '\n').join(''); }
+        catch { throw new ServiceError('ledger_unverified', 409); }
         response.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Content-Type-Options': 'nosniff',
           'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store' });
-        response.end(ledger.read().map(event => JSON.stringify(event) + '\n').join('')); return;
+        response.end(body); return;
       }
       if (method !== 'POST') throw new ServiceError('not_found', 404);
       if (path === '/webhooks/airwallex') {

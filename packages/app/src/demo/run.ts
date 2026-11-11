@@ -11,7 +11,7 @@ import { MemoryApprovalStore, type ApprovalStore } from '../server/store.js';
 import { reconciledSpendInWindowMinor, TransactionLoop } from '../server/transactions.js';
 import { installDemoSignalHandlers } from './safety.js';
 import { createFakeAirwallex } from './fake-airwallex.js';
-import { DEMO_POLICY_NOTES, demoReserveFloorMinor } from './policy.js';
+import { DEMO_POLICY_NOTES, DEMO_RESERVE_RULE, demoReserveFloorMinor } from './policy.js';
 import { cardControlsReadback, createAppAirwallexClient } from '../server/airwallex-client.js';
 
 export function demoContext(service: ApprovalService): AgentContext {
@@ -56,8 +56,8 @@ export async function runDemo(options: {
     ctx.reserveFloorMinor = { USD: demoReserveFloorMinor(balances) };
     ctx.balanceProvider = async () => balances;
     const floor = ((ctx.reserveFloorMinor['USD'] ?? 0) / 100).toFixed(2);
-    for (const note of policyNotes) say(`Demo policy: ${note}`);
-    say(`Demo policy: reserve floor ${floor} USD must remain after upfront charges`);
+    say(`Demo policy: ${DEMO_RESERVE_RULE} = ${floor} USD must remain after upfront charges`);
+    for (const note of policyNotes.slice(1)) say(`Demo policy: ${note}`);
     const result = await runAgent({ intent: 'design tool', usage: { horizonMonths: 12 },
       ctx, sources: [createCuratedSource()], ledger, approvalService: service });
     const annual = result.decision.ranked.find(entry => entry.candidate.plan === 'annual');

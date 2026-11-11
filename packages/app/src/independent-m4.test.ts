@@ -814,7 +814,7 @@ describe('independent M4 audit page run-mode labels', () => {
     );
     const ledger = new InMemoryLedgerStore();
     if (runMode) {
-      ledger.append({ kind: 'run_started', mode: 'offline_emulator', policyNotes: ['reserve floor 500.00 USD must remain after upfront charges'] }, INSTANT);
+      ledger.append({ kind: 'run_started', mode: 'offline_emulator', policyNotes: ['reserve floor = max(0, USD available - 500.00) = 500.00 USD must remain after upfront charges'] }, INSTANT);
     }
     ledger.append({
       kind: 'authorization', source: 'simulated', cardId: 'card_test_1', amount: '10.00', currency: 'USD',

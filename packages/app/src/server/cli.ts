@@ -21,7 +21,8 @@ try {
   const client = createAppAirwallexClient(config, globalThis.fetch);
   const service = new ApprovalService({ store, ledger, client, cardholderId });
   const secret = process.env['AIRWALLEX_WEBHOOK_SECRET'];
-  const server = createConsoleServer(service, secret ? { webhookSecret: secret } : {});
+  const server = createConsoleServer(service, { auditFile: './console-data/ledger.jsonl',
+    ...(secret ? { webhookSecret: secret } : {}) });
   server.once('close', () => cleanup());
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);

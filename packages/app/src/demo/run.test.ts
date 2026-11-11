@@ -31,7 +31,9 @@ it('runs the offline main line with exact ledger events, durable JSONL, controls
     expect(transcript).toContain('emulated (offline)');
     expect(transcript.toLowerCase()).not.toContain('sandbox');
     expect(transcript).toContain('Demo operator froze the card');
-    expect(transcript).toContain('reserve floor 500.00 USD');
+    expect(result.transcript.filter(line => line.includes('reserve floor'))).toEqual([
+      'Demo policy: reserve floor = max(0, USD available - 500.00) = 500.00 USD must remain after upfront charges',
+    ]);
     expect(transcript).toContain('controls read back:'); expect(transcript).toContain('"amount":60');
     expect(transcript).toContain('Ledger head: {"seq":');
     expect(transcript).not.toContain('OPERATOR TOKEN'); expect(transcript).not.toContain('APPROVAL NONCE');
@@ -60,7 +62,9 @@ it('uses a real-client transport injection and adapts the reserve scenario to a 
   const result = await runDemo({ client: f.client, now: f.now, cardholderId: 'cardholder_test_01', outputDir: false });
   expect(result.verification.ok).toBe(true); expect(f.fake.createCalls).toBe(1);
   expect(result.ledger.read()[0]?.event).toMatchObject({ kind: 'run_started', mode: 'sandbox', policyNotes: [expect.stringContaining('reserve floor = max'), expect.any(String)] });
-  expect(result.transcript.join('\n')).toContain('reserve floor 9500.00 USD');
+  expect(result.transcript.filter(line => line.includes('reserve floor'))).toEqual([
+    'Demo policy: reserve floor = max(0, USD available - 500.00) = 9500.00 USD must remain after upfront charges',
+  ]);
   expect(result.ledger.read()[3]?.event).toMatchObject({ kind: 'decision', action: 'ask', chosenOfferId: 'curated-designco-team-monthly' });
   expect([...f.fake.cards.values()][0]?.card_status).toBe('INACTIVE');
 });

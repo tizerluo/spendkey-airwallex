@@ -1,8 +1,9 @@
 import { signedDecimalToMinor } from '@sk/ledger';
 
 /** Shared, synthetic demo scenario: leave $400 after the $100 obligation. */
+export const DEMO_RESERVE_RULE = 'reserve floor = max(0, USD available - 500.00)';
 export const DEMO_POLICY_NOTES = [
-  'reserve floor = max(0, available USD balance - 500.00 USD) must remain after upfront charges (demo policy)',
+  `${DEMO_RESERVE_RULE} USD must remain after upfront charges`,
   'known obligation 100.00 USD within 30 days',
 ];
 
