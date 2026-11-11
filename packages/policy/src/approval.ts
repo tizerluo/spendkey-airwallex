@@ -40,7 +40,7 @@ export class ApprovalError extends Error {
 export const approvalRequestSchema = z.object({
   approvalRequestId: z.string().min(1), offerId: z.string().min(1), vendor: z.string().min(1), product: z.string().min(1),
   plan: z.enum(['monthly', 'annual', 'usage', 'one_time']), currency: currencySchema,
-  amountMinor: minorAmountSchema, interval: z.enum(['PER_TRANSACTION', 'MONTHLY', 'ALL_TIME']),
+  amountMinor: minorAmountSchema.positive(), interval: z.enum(['PER_TRANSACTION', 'MONTHLY', 'ALL_TIME']),
   allowedTransactionCount: z.enum(['SINGLE', 'MULTIPLE']), merchantCategoryCode: mccSchema.optional(),
   commitmentMonths: z.number().int().nonnegative().safe(), priceStatus: z.enum(['verified', 'price_unverified']),
   createdAt: z.string().datetime({ offset: true }), expiresAt: z.string().datetime({ offset: true }),
@@ -57,8 +57,8 @@ export function createApprovalRequest(candidate: Candidate, options: ApprovalReq
   const request: ApprovalRequest = {
     ...options, offerId: candidate.offerId, vendor: candidate.vendor, product: candidate.product,
     plan: candidate.plan, currency: candidate.currency, amountMinor: candidate.perChargeMinor,
-    // Use a single-charge ceiling for every plan; recurrence is controlled separately by count.
-    interval: 'PER_TRANSACTION',
+    // Recurring plans cap the monthly aggregate at the approved monthly bill.
+    interval: candidate.plan === 'monthly' || candidate.plan === 'usage' ? 'MONTHLY' : 'PER_TRANSACTION',
     allowedTransactionCount: candidate.plan === 'annual' || candidate.plan === 'one_time' ? 'SINGLE' : 'MULTIPLE',
     ...(candidate.merchantCategoryCode === undefined ? {} : { merchantCategoryCode: candidate.merchantCategoryCode }),
     commitmentMonths: candidate.commitmentMonths, priceStatus: candidate.priceStatus,

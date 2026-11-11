@@ -97,6 +97,3 @@ export function minorToDecimal(amount: number): string {
 export function microsToMinorCeil(micros: number): number {
   return divideSafeCeil(micros, MICROS_PER_UNIT / MINOR_PER_UNIT, 'micro amount');
 }
-
-/** @deprecated Use microsToMinorCeil; this alias keeps the rounding explicit. */
-export const ceilMicrosToMinor = microsToMinorCeil;

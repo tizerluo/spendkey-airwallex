@@ -18,24 +18,35 @@ describe('reserve_floor', () => {
       .toMatchObject({ pass: false, code: 'reserve_unknown_currency' });
     expect(reserveFloor(candidate(), context({ reserveFloorMinor: {} }))).toMatchObject({ code: 'reserve_unknown_currency' });
   });
-  it('includes today and the last horizon day, excludes other currencies, past and later obligations', () => {
+  it('includes today and the last horizon day, excludes other currencies and later obligations', () => {
     const ctx = context({ balances: [{ currency: 'USD', available_amount: '650' }], knownObligations: [
       { currency: 'USD', amountMinor: 4_000, dueInDays: 0 },
       { currency: 'USD', amountMinor: 6_000, dueInDays: 30 },
       { currency: 'USD', amountMinor: 99_000, dueInDays: 31 },
-      { currency: 'USD', amountMinor: 99_000, dueInDays: -1 },
       { currency: 'EUR', amountMinor: 99_000, dueInDays: 1 },
     ] });
     expect(reserveFloor(candidate(), ctx).code).toBe('reserve_ok');
     expect(reserveFloor(candidate({ upfrontMinor: 5001 }), ctx).code).toBe('reserve_breach');
   });
+  it('treats overdue obligations as due now, including with a zero-day horizon', () => {
+    const ctx = context({ balances: [{ currency: 'USD', available_amount: '650' }], reserveHorizonDays: 0,
+      knownObligations: [{ currency: 'USD', amountMinor: 10_001, dueInDays: -1 }] });
+    expect(reserveFloor(candidate(), ctx)).toMatchObject({ pass: false, code: 'reserve_breach' });
+    expect(reserveFloor(candidate(), { ...ctx, knownObligations: [] }).pass).toBe(true);
+  });
   it.each([NaN, Infinity, 'NaN', '1.005', '90071992547409.92'])('rejects invalid balance %s', available_amount => {
     expect(() => reserveFloor(candidate(), context({ balances: [{ currency: 'USD', available_amount }] }))).toThrow();
   });
-  it('rejects ambiguous balances and unsafe obligation totals', () => {
-    expect(() => reserveFloor(candidate(), context({ balances: [
+  it('fails closed for duplicate balances, even without a reserve floor', () => {
+    const balances = [
       { currency: 'USD', available_amount: '1000' }, { currency: 'USD', available_amount: '1000' },
-    ] }))).toThrow('ambiguous_currency_balance');
+    ];
+    expect(reserveFloor(candidate(), context({ balances }))).toMatchObject({
+      rule: 'reserve_floor', pass: false, code: 'reserve_ambiguous_balance',
+    });
+    expect(reserveFloor(candidate(), context({ balances, reserveFloorMinor: {} })).code).toBe('reserve_ambiguous_balance');
+  });
+  it('rejects unsafe obligation totals', () => {
     expect(() => reserveFloor(candidate(), context({ knownObligations: [
       { currency: 'USD', amountMinor: Number.MAX_SAFE_INTEGER, dueInDays: 1 },
       { currency: 'USD', amountMinor: 1, dueInDays: 1 },
@@ -50,7 +61,11 @@ describe('window_budget', () => {
   });
   it('fails over budget, including already excessive spending', () => {
     expect(windowBudget(candidate(), context({ spentInWindowMinor: 95001 }))).toMatchObject({ pass: false, code: 'budget_exceeded' });
-    expect(windowBudget(candidate({ perChargeMinor: 0 }), context({ spentInWindowMinor: 100001 }))).toMatchObject({ code: 'budget_exceeded' });
+    expect(windowBudget(candidate({ perChargeMinor: 1 }), context({ spentInWindowMinor: 100001 }))).toMatchObject({ code: 'budget_exceeded' });
+  });
+  it('fails closed for zero charges, without relying on a usage note', () => {
+    expect(windowBudget(candidate({ plan: 'usage', perChargeMinor: 0, notes: [] }), context()))
+      .toMatchObject({ rule: 'window_budget', pass: false, code: 'zero_charge_unknown_cost' });
   });
   it('fails a currency mismatch without converting money', () => {
     expect(windowBudget(candidate({ currency: 'EUR' }), context())).toMatchObject({ pass: false, code: 'budget_currency_mismatch' });

@@ -2,12 +2,12 @@ import { z } from 'zod';
 import type { Balance } from '@sk/airwallex';
 import type { MinorAmount } from './money.js';
 
-// Shared M2 contract: intentionally structural, with no dependency on @sk/compare.
+// Shared M2 contract: structural, with no runtime dependency on @sk/compare.
 export interface Candidate {
   offerId: string; vendor: string; product: string; sourceId: 'curated' | 'x402-snapshot';
   plan: 'monthly' | 'annual' | 'usage' | 'one_time';
   currency: string;
-  merchantCategoryCode?: string;
+  merchantCategoryCode?: string | undefined;
   commitmentMonths: number;
   priceStatus: 'verified' | 'price_unverified';
   availability: 'available' | 'region_unavailable';
@@ -41,7 +41,7 @@ export const candidateSchema = z.object({
 export interface KnownObligation {
   currency: string;
   amountMinor: MinorAmount;
-  /** Whole days from this balance snapshot; 0 means due today. */
+  /** Whole days from this balance snapshot; 0 is today, negative is overdue and due now. */
   dueInDays: number;
 }
 export interface PolicyContext {

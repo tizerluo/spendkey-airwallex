@@ -2,7 +2,8 @@
 
 Offline policy and human approval for Spendkey card purchases. The agent can
 return only `ask` or `refuse`; issuance requires a separate human approval.
-There are no network calls in this package and no dependency on `@sk/compare`.
+There are no network calls in this package and no runtime dependency on
+`@sk/compare`; a development dependency checks the shared Candidate contract.
 
 `Candidate`, `MinorAmount`, and `UsageProfile` copy the shared M2 structural
 contract. All cost fields are nonnegative safe integer **minor units (cents)**.
@@ -29,15 +30,19 @@ Invalid numeric inputs throw rather than permitting a purchase.
 
 - `balances`: Airwallex `getBalances()` records, or their `currency` and
   `available_amount` fields. Duplicate records for the candidate currency are
-  rejected to avoid silently selecting or summing ambiguous balances.
+  refused with `reserve_ambiguous_balance` to avoid silently selecting or
+  summing ambiguous balances. This returns a failing RuleResult, not an error.
 - `knownObligations`: `{ currency, amountMinor, dueInDays }[]`. `dueInDays` is
-  a whole-day offset relative to the balance snapshot. Include days **0 through
-  reserveHorizonDays**, inclusive; exclude past obligations and other currencies.
+  a whole-day offset relative to the balance snapshot. Overdue obligations
+  (negative days) count as due now. Include every obligation due on or before
+  `reserveHorizonDays`, inclusive; exclude later dates and other currencies.
 - `reserveFloorMinor`: floors keyed by currency. Missing balance or floor fails
   with `reserve_unknown_currency`; a shortfall gives `reserve_breach`.
 - `budgetCurrency`, `spentInWindowMinor`, `windowBudgetMinor`: one window in
   one currency. Compare the largest expected single charge, not upfront cash.
   Mismatch gives `budget_currency_mismatch`; excess gives `budget_exceeded`.
+  A zero charge fails with `zero_charge_unknown_cost`, including usage offers
+  whose missing usage profile produced a zero-cost placeholder.
 - `maxCommitmentMonths`: inclusive maximum; excess gives `commitment_too_long`.
 - `billingCountry`, `cardCountry`: the only countries relevant to availability.
   Candidate availability must already be resolved upstream against these two
@@ -48,7 +53,11 @@ Success codes are `reserve_ok`, `budget_ok`, `commitment_ok`, and `region_ok`.
 Callers must keep the balance/obligation snapshot and spending window current.
 The package does not reserve funds or serialize concurrent purchase attempts.
 
-`decidePurchase(candidates, ctx)` puts passing candidates first, then sorts by
+`decidePurchase(candidates, ctx)` ranks only candidates in `budgetCurrency`.
+Other currencies are ineligible and appear after the ranking in input order,
+with the failing reason `currency_not_budgeted`; no FX comparison takes place.
+This reason also appears in the decision reasons when such candidates exist.
+Within the budget currency, it puts passing candidates first, then sorts by
 `horizonCost.highMinor`, breaking ties with `upfrontMinor` (stable input order
 for remaining ties). It asks for the cheapest passing candidate, or refuses
 with every distinct failure code. Empty input refuses with empty reasons.
@@ -62,6 +71,18 @@ only its first 50.00 leaves the account at purchase time.
 
 ## Human approval and card controls
 
+Trust boundary: `approve()` and `approvalToCardInput()` must run only in the
+human-facing approval service, never in the agent process. That service must
+authenticate the human and obtain their explicit approval of the presented
+terms. It owns card issuance. The agent submits an ApprovalRequest across this
+boundary; it cannot supply a trusted Approval or human identity. `kind: 'human'`
+and `termsHash` are structural checks, not proof of authentication or origin:
+code in the same process could forge both. This MVP relies on service isolation
+and authenticated approval handling, with no HMAC on Approval objects.
+
+The walkthrough below spans the agent and human-facing approval service;
+the comment marks where execution moves to that service.
+
 ```ts
 import {
   decidePurchase, createApprovalRequest, termsHash, approve, approvalToCardInput,
@@ -74,8 +95,9 @@ if (decision.action === 'ask' && decision.chosen) {
     createdAt: '2030-01-01T00:00:00Z',
     expiresAt: '2030-01-01T01:00:00Z',
   });
-  // Present the request and hash to an authenticated human in the application.
   const presentedTermsHash = termsHash(request);
+  // Human-facing approval service only, after receiving request + hash and
+  // authenticating the human who explicitly approves the displayed terms:
   const approval = approve(request, {
     approver: { kind: 'human', id: 'human_test_01' },
     presentedTermsHash,
@@ -90,11 +112,13 @@ if (decision.action === 'ask' && decision.chosen) {
 }
 ```
 
-The default interval is **PER_TRANSACTION for every plan**, including monthly.
-It caps each charge at `perChargeMinor`; it does not promise a monthly aggregate
-cap. Annual/one-time plans use `SINGLE`; monthly/usage plans use `MULTIPLE`.
-Explicitly edited `MONTHLY` or `ALL_TIME` intervals must be presented and approved
-with their changed hash before mapping.
+Monthly/usage plans use **MONTHLY + MULTIPLE**, capping the aggregate charged
+in each card monthly interval at the approved `perChargeMinor` (the monthly
+price or high usage estimate). Annual/one-time plans use **PER_TRANSACTION +
+SINGLE**: only one charge is allowed, bounded by the approved amount.
+Any edited interval must be presented and approved with its changed hash.
+Monthly card intervals do not coordinate several cards or arbitrary application
+budget windows; callers must still keep window spending current.
 
 `termsHash` reuses `@sr/core` audit canonical JSON and SHA-256. Its lowercase hex
 digest binds exactly `offerId`, `vendor`, `plan`, `currency`, `amountMinor`,
@@ -108,7 +132,8 @@ status are outside this specified hash contract.
 `terms_mismatch`, `approval_expired`, or `mcc_required`. A human must explicitly
 supply a four-digit MCC if absent; approval records the hash of those completed
 terms, which differs from the original MCC-free hash. The original request is
-not mutated. Malformed requests or times throw validation errors; a timestamp
+not mutated. `createApprovalRequest` rejects zero `amountMinor` at validation,
+before a human is asked to approve. Malformed requests or times throw validation errors; a timestamp
 before creation is rejected. Human identity must be authenticated by the
 application; the structural `kind: 'human'` field is not an authentication system.
 

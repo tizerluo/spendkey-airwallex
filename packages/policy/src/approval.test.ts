@@ -20,18 +20,22 @@ function expectCode(action: () => unknown, code: string) {
 
 describe('approval requests', () => {
   it.each([
-    ['monthly', 'MULTIPLE'], ['usage', 'MULTIPLE'], ['annual', 'SINGLE'], ['one_time', 'SINGLE'],
-  ] as const)('maps %s to per-transaction limits with %s charges', (plan, allowedTransactionCount) => {
+    ['monthly', 'MULTIPLE', 'MONTHLY'], ['usage', 'MULTIPLE', 'MONTHLY'],
+    ['annual', 'SINGLE', 'PER_TRANSACTION'], ['one_time', 'SINGLE', 'PER_TRANSACTION'],
+  ] as const)('maps %s to %s charges with %s limits', (plan, allowedTransactionCount, interval) => {
     const result = createApprovalRequest(candidate({ plan, upfrontMinor: 0, perChargeMinor: 1234 }), times);
     expect(result).toEqual({
       ...times, offerId: 'offer_test_monthly', vendor: 'Test Vendor', product: 'Test Product', plan,
-      currency: 'USD', amountMinor: 1234, interval: 'PER_TRANSACTION', allowedTransactionCount,
+      currency: 'USD', amountMinor: 1234, interval, allowedTransactionCount,
       merchantCategoryCode: '5734', commitmentMonths: 1, priceStatus: 'verified',
     });
   });
   it('rejects invalid time windows and candidate money', () => {
     expect(() => createApprovalRequest(candidate(), { ...times, expiresAt: times.createdAt })).toThrow();
     expect(() => createApprovalRequest(candidate({ perChargeMinor: 1.5 }), times)).toThrow();
+  });
+  it('rejects a zero charge before presenting an approval request', () => {
+    expect(() => createApprovalRequest(candidate({ plan: 'usage', upfrontMinor: 0, perChargeMinor: 0 }), times)).toThrow();
   });
 });
 
@@ -52,7 +56,7 @@ describe('termsHash', () => {
   });
   it.each([
     { offerId: 'offer_test_other' }, { vendor: 'Other Test Vendor' }, { plan: 'annual' }, { currency: 'EUR' },
-    { amountMinor: 5001 }, { interval: 'MONTHLY' }, { interval: 'ALL_TIME' }, { allowedTransactionCount: 'SINGLE' },
+    { amountMinor: 5001 }, { interval: 'PER_TRANSACTION' }, { interval: 'ALL_TIME' }, { allowedTransactionCount: 'SINGLE' },
     { merchantCategoryCode: '5817' }, { commitmentMonths: 12 }, { expiresAt: '2030-01-01T02:00:00Z' },
   ] satisfies Partial<ApprovalRequest>[])('changes when a binding field changes: %j', change => {
     const input = request();

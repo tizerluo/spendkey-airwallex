@@ -14,17 +14,19 @@ export function reserveFloor(candidate: Candidate, ctx: PolicyContext): RuleResu
   assertMinorAmount(ctx.reserveHorizonDays);
   const balances = ctx.balances.filter(balance => balance.currency === candidate.currency);
   const floor = ctx.reserveFloorMinor[candidate.currency];
+  if (balances.length > 1) {
+    return { rule: 'reserve_floor', pass: false, code: 'reserve_ambiguous_balance', detail: `Multiple balances for ${candidate.currency}` };
+  }
   if (balances.length === 0 || floor === undefined) {
     return { rule: 'reserve_floor', pass: false, code: 'reserve_unknown_currency', detail: `Missing balance or reserve floor for ${candidate.currency}` };
   }
-  if (balances.length !== 1) throw new RangeError('ambiguous_currency_balance');
   const available = decimalToMinor(balances[0]!.available_amount);
   assertMinorAmount(floor);
   let obligations = 0;
   for (const obligation of ctx.knownObligations) {
     if (!Number.isSafeInteger(obligation.dueInDays)) throw new RangeError('invalid_obligation_due_days');
     assertMinorAmount(obligation.amountMinor);
-    if (obligation.currency === candidate.currency && obligation.dueInDays >= 0 && obligation.dueInDays <= ctx.reserveHorizonDays) {
+    if (obligation.currency === candidate.currency && obligation.dueInDays <= ctx.reserveHorizonDays) {
       obligations = addMinor(obligations, obligation.amountMinor);
     }
   }
@@ -41,6 +43,9 @@ export function windowBudget(candidate: Candidate, ctx: PolicyContext): RuleResu
   assertMinorAmount(ctx.spentInWindowMinor);
   assertMinorAmount(ctx.windowBudgetMinor);
   assertMinorAmount(candidate.perChargeMinor);
+  if (candidate.perChargeMinor === 0) {
+    return { rule: 'window_budget', pass: false, code: 'zero_charge_unknown_cost', detail: 'A positive known charge is required for approval' };
+  }
   const pass = ctx.spentInWindowMinor <= ctx.windowBudgetMinor && candidate.perChargeMinor <= ctx.windowBudgetMinor - ctx.spentInWindowMinor;
   return { rule: 'window_budget', pass, code: pass ? 'budget_ok' : 'budget_exceeded', detail: `Spent ${ctx.spentInWindowMinor}, charge ${candidate.perChargeMinor}, budget ${ctx.windowBudgetMinor} minor ${candidate.currency}` };
 }

@@ -158,7 +158,19 @@ describe('toCandidate: usage plans', () => {
     const candidate = toCandidate(offer, { horizonMonths: 12 });
     expect(candidate.horizonCost).toEqual({ lowMinor: 0, highMinor: 0 });
     expect(candidate.perChargeMinor).toBe(0);
+    expect(candidate.notes).toContain('usage_unknown');
     expect(candidate.notes.some((note) => note.includes('usage unknown'))).toBe(true);
+  });
+
+  it('sorts unknown usage after priced candidates regardless of input order', async () => {
+    const [unknown] = await createX402SnapshotSource().listOffers({ intent: 'weather' });
+    if (!unknown) throw new Error('missing weather snapshot offer');
+    const priced = offerFor(await designOffers(), 'monthly');
+    for (const offers of [[unknown, priced], [priced, unknown]]) {
+      const result = compareOffers(offers, { horizonMonths: 12 });
+      expect(result.candidates.map(candidate => candidate.offerId)).toEqual([priced.id, unknown.id]);
+      expect(result.candidates[1]?.notes).toContain('usage_unknown');
+    }
   });
 
   it('converts per_1k_units prices using unitsPerMonth', async () => {

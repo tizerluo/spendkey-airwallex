@@ -53,8 +53,8 @@ Each candidate carries:
 | `monthlyRunRateMinor` | Monthly cost, as a range |
 | `notes` | Human-readable explanations (unverified price, usage range, seats, mixed currencies) |
 
-Candidates are sorted by `horizonCost.highMinor` ascending, then
-`upfrontMinor`.
+Candidates with unknown usage sort last. Other candidates are sorted by
+`horizonCost.highMinor` ascending, then `upfrontMinor`.
 
 ## Plan rules
 
@@ -67,8 +67,10 @@ Candidates are sorted by `horizonCost.highMinor` ascending, then
 | `one_time` | price | price | price | ceil(price / months) |
 
 Usage costs use `callsPerMonth` or `unitsPerMonth`. When the relevant profile is
-missing, the candidate keeps a `0.00` range and adds a `usage unknown` note
-instead of inventing demand.
+missing, the candidate keeps a zero range as an unknown-cost placeholder and
+adds the note code `usage_unknown` with an explanation. This is not a free
+offer or a savings claim. These candidates sort last and policy refuses them
+until a positive usage cost is known.
 
 ### Seats
 

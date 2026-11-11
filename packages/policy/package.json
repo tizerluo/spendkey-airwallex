@@ -6,9 +6,10 @@
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
   "scripts": {
     "build": "pnpm --filter @sk/airwallex build && pnpm --filter @sr/core build && tsc -p tsconfig.build.json",
-    "test": "pnpm --filter @sk/airwallex build && pnpm --filter @sr/core build && vitest run",
-    "typecheck": "pnpm --filter @sk/airwallex build && pnpm --filter @sr/core build && tsc --noEmit",
+    "test": "pnpm --filter @sk/airwallex build && pnpm --filter @sr/core build && pnpm --filter @sk/compare build && vitest run",
+    "typecheck": "pnpm --filter @sk/airwallex build && pnpm --filter @sr/core build && pnpm --filter @sk/compare build && tsc --noEmit",
     "lint": "eslint ."
   },
-  "dependencies": { "zod": "3.25.76", "@sk/airwallex": "workspace:*", "@sr/core": "workspace:*" }
+  "dependencies": { "zod": "3.25.76", "@sk/airwallex": "workspace:*", "@sr/core": "workspace:*" },
+  "devDependencies": { "@sk/compare": "workspace:*" }
 }

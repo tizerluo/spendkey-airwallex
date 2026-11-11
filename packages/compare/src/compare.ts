@@ -117,7 +117,7 @@ function usageCost(offer: Offer, usage: UsageProfile, notes: string[]): CostShap
   let highMinor = 0;
 
   if (profile === undefined) {
-    notes.push(`usage unknown: ${profileName} not provided; cost range shown as 0.00`);
+    notes.push('usage_unknown', `usage unknown: ${profileName} not provided; zero range is a placeholder, not a price`);
   } else {
     const divisor = perCall ? 1 : 1_000;
     lowMinor = usageMonthlyMinor(profile.low, unitPriceMicros, divisor);
@@ -225,6 +225,7 @@ export function compareOffers(
 
   comparable.sort(
     (left, right) =>
+      Number(left.notes.includes('usage_unknown')) - Number(right.notes.includes('usage_unknown')) ||
       left.horizonCost.highMinor - right.horizonCost.highMinor ||
       left.upfrontMinor - right.upfrontMinor,
   );
