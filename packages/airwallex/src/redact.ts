@@ -18,12 +18,14 @@ export function hasMaskChar(value: string): boolean {
 }
 
 /**
- * 无掩码且数字不少于 13 位时整段换成 [redacted]。
+ * 抹掉掩码字符后仍有 13 位及以上数字时整段换成 [redacted]。
+ * 掩码字符不构成豁免，否则 4111 - 1111 - 1111 - 1111 x 这类值会漏过。
+ * 合法掩码至多 10 位数字，不受影响。
  * 否则先抹连续长串（避免 20 位只截前 19 位），再抹任意非字母分隔符隔开的 13–19 位，
  * 最后抹用掩码字母 x/X 隔开的长数字（x 是字母，上一则正则不会跨越它）。
  */
 export function redactSensitiveText(value: string): string {
-  if (digitCount(value) >= 13 && !hasMaskChar(value)) return '[redacted]';
+  if (digitCount(value.replace(/[*xX•●#]+/g, '')) >= 13) return '[redacted]';
   return value
     .replace(/\d{13,}/g, '[redacted]')
     // 非字母分隔符，外加掩码字母 x/X。x 不在 [^\dA-Za-z] 里，否则 4111x1111… 会留在 raw。
@@ -33,8 +35,9 @@ export function redactSensitiveText(value: string): string {
 
 /** 非 JSON 正文只留长度和脱敏后的前 200 字。length 是原文长度。 */
 export function nonJsonDiagnostic(text: string, length = text.length): { nonJson: true; length: number; head: string } {
+  // 命中的键之后整行都不可信：Bearer/Basic 方案和带引号、含空格的值都可能在键后面。
   const scrubbed = redactSensitiveText(text.replace(
-    /(pan|card_?number|cvv|cvc|token|secret|key|password|auth|security|verification)[^,&;\s]*\s*[:=]\s*\S+/gi,
+    /(pan|card_?number|cvv|cvc|token|secret|key|password|auth|security|verification)[^,&;\s]*\s*[:=][^\n]*/gi,
     '[redacted]',
   ));
   return { nonJson: true, length, head: scrubbed.slice(0, 200) };

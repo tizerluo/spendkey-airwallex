@@ -7,7 +7,7 @@ import {
   AirwallexClient, CARD_NICKNAME_MAX_LENGTH, cardNicknameFromRequestId, cardSchema, createCardInputSchema, loadAirwallexConfig,
   parseCardLenient,
 } from './index.js';
-import { redactBody } from './redact.js';
+import { nonJsonDiagnostic, redactBody } from './redact.js';
 
 const input = createCardInputSchema.parse({
   ...JSON.parse(readFileSync(new URL('../fixtures/card-create.json', import.meta.url), 'utf8')),
@@ -300,12 +300,12 @@ describe('reconciliation response tolerance', () => {
       transaction_currency: 'USD', merchant_category_code: '7372' });
     expect(simulation.panLikeValueDropped).toBe(true);
     expect(simulation.masked_card_number).toBeUndefined();
-    expect(simulation.extra).toEqual({ note: '[redacted]', reference: '[redacted]', visible_mask: '[redacted] x' });
+    expect(simulation.extra).toEqual({ note: '[redacted]', reference: '[redacted]', visible_mask: '[redacted]' });
     expect(JSON.stringify(simulation)).not.toContain('0000');
     const transaction = (await client.listTransactions()).items[0];
     expect(transaction?.panLikeValueDropped).toBe(true);
     expect(transaction?.masked_card_number).toBeUndefined();
-    expect(transaction?.extra).toEqual({ note: '[redacted]', reference: '[redacted]', visible_mask: '[redacted] x' });
+    expect(transaction?.extra).toEqual({ note: '[redacted]', reference: '[redacted]', visible_mask: '[redacted]' });
     expect(JSON.stringify(transaction)).not.toContain('0000');
   });
 
@@ -370,7 +370,7 @@ describe('round-2 redaction probes', () => {
   it.each(separatorPans)('redacts separator PAN %s under a kept key, in raw, and in extra', async pan => {
     expect(redactBody({ masked_card_number: pan })).toEqual({ masked_card_number: '[redacted]' });
     expect(redactBody({ note: pan })).toEqual({ note: '[redacted]' });
-    expect(redactBody({ nested: { masked_card_number: `${pan} x` } })).toEqual({ nested: { masked_card_number: '[redacted] x' } });
+    expect(redactBody({ nested: { masked_card_number: `${pan} x` } })).toEqual({ nested: { masked_card_number: '[redacted]' } });
     const { client } = harness(url => url.pathname.endsWith('/simulation/issuing/create')
       ? json({ process_result: 'APPROVED', note: pan, details: { masked_card_number: pan } })
       : json({ ...baseCard, masked_card_number: pan, note: pan }));
@@ -407,7 +407,7 @@ describe('round-2 redaction probes', () => {
     const result = await client.createCard(input);
     expect(result).toEqual({
       ok: true, unconfirmed: true,
-      raw: { nonJson: true, length: body.length, head: '[redacted] card_id=c1' },
+      raw: { nonJson: true, length: body.length, head: '[redacted]' },
     });
     expect(result.card).toBeUndefined();
     expect(JSON.stringify(result.raw)).not.toContain('cvv');
@@ -420,7 +420,7 @@ describe('round-2 redaction probes', () => {
     const result = await client.createCard(input);
     expect(result).toEqual({
       ok: true, unconfirmed: true,
-      raw: { nonJson: true, length: body.length, head: '[redacted] [redacted] card_id=c1' },
+      raw: { nonJson: true, length: body.length, head: '[redacted]' },
     });
     expect(JSON.stringify(result.raw)).not.toContain('security');
     expect(JSON.stringify(result.raw)).not.toContain('verification');
@@ -455,6 +455,37 @@ describe('round-2 redaction probes', () => {
     expect(result.raw).toEqual({ card_id: 'card_test_01', enc: {} });
     expect(JSON.stringify(result.raw)).not.toContain('cvv');
     expect(JSON.stringify(result.raw)).not.toContain('token');
+  });
+});
+
+describe('round-3 redaction probes', () => {
+  it('redacts a wide-separator PAN even when a mask character is present', () => {
+    expect(redactBody({ masked_card_number: '4111 - 1111 - 1111 - 1111 x' })).toEqual({
+      masked_card_number: '[redacted]',
+    });
+    expect(redactBody({ n: 'card 4111 - 1111 - 1111 - 1111 (****1234)' })).toEqual({ n: '[redacted]' });
+    expect(redactBody({ masked_card_number: '4111 - 1111 - 1111 - 1111 ****1234' })).toEqual({
+      masked_card_number: '[redacted]',
+    });
+  });
+
+  it('keeps legitimate masks unchanged', () => {
+    expect(redactBody({ masked_card_number: '424242******1234' })).toEqual({
+      masked_card_number: '424242******1234',
+    });
+    expect(redactBody({ masked_card_number: '************2959' })).toEqual({
+      masked_card_number: '************2959',
+    });
+  });
+
+  it('scrubs the whole line after a credential key in a non-JSON body', () => {
+    const bearer = nonJsonDiagnostic('Authorization: Bearer abc123secret card_id=c1');
+    expect(bearer.head).toBe('[redacted]');
+    expect(JSON.stringify(bearer)).not.toContain('abc123secret');
+
+    expect(nonJsonDiagnostic('Authorization: Basic dGVzdDp0ZXN0').head).toBe('[redacted]');
+    expect(nonJsonDiagnostic('token: "a b"').head).toBe('[redacted]');
+    expect(nonJsonDiagnostic('card_id=c1').head).toBe('card_id=c1');
   });
 });
 
