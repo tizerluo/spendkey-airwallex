@@ -210,6 +210,7 @@ pnpm --filter @sk/app lint
 Vitest uses the repository offline setup, which replaces global `fetch` with a
 throwing stub. These tests never call it. Fixture values are synthetic
 (`approval_request_test_01`, `card_test_01`, `****0000`).
+
 ## Operator APIs (M4)
 
 `POST /approvals/:id/abandon` requires `X-Operator-Token` and the approval's `csrf`. It accepts only `failed` records with `attempted: true` and no card ID. A lookup by the original request ID must find no card; a found card is retained for `/recover`. Abandonment records `approval_rejected` with code `operator_abandoned`; restart the console to seed a fresh policy decision/request. Provider failures return `{ error, provider: { status, code, message, step } }` and redacted ledger evidence.
