@@ -1,10 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { z } from 'zod';
 import { configApiKey, isSandboxUrl } from './config.js';
 import type { AirwallexConfig } from './config.js';
 import { AirwallexApiError, AirwallexResponseError, AirwallexSafetyError } from './errors.js';
 import {
-  authorizationControlsSchema, balancesSchema, cardholderInputSchema, cardholderSchema,
+  authorizationControlsInputSchema, balancesSchema, cardholderInputSchema, cardholderSchema,
   cardLimitsSchema, cardSchema, cardStatusSchema, createCardInputSchema, issuingConfigSchema,
   loginSchema, simulationInputSchema, simulationSchema, transactionsSchema,
 } from './schemas.js';
@@ -17,6 +17,22 @@ export interface AirwallexClientOptions {
   fetch: typeof globalThis.fetch;
   /** Injectable clock for deterministic offline token-expiry tests. */
   now?: () => number;
+}
+
+/** Stable card idempotency key: reuse this approval's ID across createCard calls. */
+export function cardRequestIdFromApproval(approvalId: string): string {
+  return `sk-${createHash('sha256').update(approvalId).digest('hex').slice(0, 40)}`;
+}
+
+function controlsForRequest(input: AuthorizationControls) {
+  const controls = authorizationControlsInputSchema.parse(input);
+  return {
+    ...controls,
+    transaction_limits: {
+      ...controls.transaction_limits,
+      limits: controls.transaction_limits.limits.map(limit => ({ ...limit, amount: Number(limit.amount) })),
+    },
+  };
 }
 
 /** Defense in depth: card PAN/CVV details paths must never reach fetch. */
@@ -41,6 +57,8 @@ export class AirwallexClient {
   #fetch: typeof globalThis.fetch;
   #now: () => number;
   #session: { token: string; expiresAt: number } | undefined;
+  /** Retain the most recently replaced or invalidated token for error redaction. */
+  #lastToken: string | undefined;
   #loginPromise: Promise<string> | undefined;
 
   constructor(config: AirwallexConfig, options: AirwallexClientOptions) {
@@ -52,7 +70,7 @@ export class AirwallexClient {
 
   #redact(value: string): string {
     let result = value;
-    for (const secret of [this.#apiKey, this.#config.clientId, this.#session?.token]) {
+    for (const secret of [this.#apiKey, this.#config.clientId, this.#session?.token, this.#lastToken]) {
       if (secret) result = result.replaceAll(secret, '[redacted]');
     }
     return result;
@@ -93,6 +111,7 @@ export class AirwallexClient {
       method: 'POST', headers: { 'x-client-id': this.#config.clientId, 'x-api-key': this.#apiKey },
     });
     const result = await this.#read(response, loginSchema);
+    this.#lastToken = this.#session?.token ?? this.#lastToken;
     this.#session = { token: result.token, expiresAt: Date.parse(result.expires_at) };
     return result.token;
   }
@@ -117,7 +136,10 @@ export class AirwallexClient {
     let response = await send();
     if (response.status === 401) {
       // A delayed 401 for an old token must not discard a newer session.
-      if (this.#session?.token === token) this.#session = undefined;
+      if (this.#session?.token === token) {
+        this.#lastToken = token;
+        this.#session = undefined;
+      }
       token = await this.#token();
       response = await send();
     }
@@ -144,10 +166,12 @@ export class AirwallexClient {
     this.#checkId(id);
     return this.#request('GET', `/api/v1/issuing/cardholders/${id}`, cardholderSchema);
   }
+  /** Callers must pass a stable request_id (see cardRequestIdFromApproval) for retries across calls. */
   createCard(input: CreateCardInput) {
     const body = createCardInputSchema.parse(input);
     return this.#request('POST', '/api/v1/issuing/cards/create', cardSchema, {
       ...body, request_id: body.request_id ?? randomUUID(),
+      authorization_controls: controlsForRequest(body.authorization_controls),
     });
   }
   getCard(id: string) { return this.#request('GET', this.#cardPath(id), cardSchema); }
@@ -166,7 +190,7 @@ export class AirwallexClient {
   unfreezeCard(id: string) { return this.updateCardStatus(id, 'ACTIVE'); }
   updateCardControls(id: string, authorizationControls: AuthorizationControls) {
     return this.#request('POST', this.#cardPath(id, '/update'), cardSchema, {
-      authorization_controls: authorizationControlsSchema.parse(authorizationControls),
+      authorization_controls: controlsForRequest(authorizationControls),
     });
   }
   listTransactions(input: ListTransactionsInput = {}) {
@@ -185,6 +209,9 @@ export class AirwallexClient {
   }
   simulateAuthorization(input: SimulateAuthorizationInput) {
     if (!isSandboxUrl(this.#config.baseUrl)) throw new AirwallexSafetyError('Simulation requires the sandbox host');
-    return this.#request('POST', '/api/v1/simulation/issuing/create', simulationSchema, simulationInputSchema.parse(input));
+    const body = simulationInputSchema.parse(input);
+    return this.#request('POST', '/api/v1/simulation/issuing/create', simulationSchema, {
+      ...body, transaction_amount: Number(body.transaction_amount),
+    });
   }
 }

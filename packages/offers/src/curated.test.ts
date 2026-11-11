@@ -62,6 +62,16 @@ describe('curated source', () => {
     expect(allowed[0]?.availability).toBe('available');
   });
 
+  it.each(['goat', 'GoAt', 'Goatee'])('matches only the exact vendor name case-insensitively: %s', async vendor => {
+    const rawGoat = readFixture('curated-offers.json', OfferListSchema).find(offer => offer.vendor === 'GOAT');
+    if (!rawGoat) throw new Error('GOAT fixture is missing');
+    // Keep "goat" in the ID and product to prove these do not trigger the rule.
+    const injected = createCuratedSource([{ ...rawGoat, vendor, product: 'GOAT comparison', priceStatus: 'verified' }]);
+    const offers = await injected.listOffers({ intent: '' });
+    expect(offers).toHaveLength(1);
+    expect(offers[0]?.priceStatus).toBe(vendor === 'Goatee' ? 'verified' : 'price_unverified');
+  });
+
   it('applies the region rule when only the card country is excluded', async () => {
     const offers = await source.listOffers({ intent: 'openai', cardCountry: 'HK' });
     expect(offers[0]?.availability).toBe('region_unavailable');

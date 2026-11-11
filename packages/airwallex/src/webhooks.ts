@@ -24,11 +24,13 @@ export function verifyWebhookSignature({
   return Math.abs(nowMs - timestampMs) <= toleranceMs;
 }
 
-/** Subscriptions of interest; parsing also accepts new event names for forward compatibility. */
-export const ISSUING_EVENT_NAMES = [
+/** Confirmed in https://www.airwallex.com/docs/developer-tools/webhooks/listen-for-webhook-events/issuing */
+export const VERIFIED_ISSUING_EVENT_NAMES = [
   'issuing.card.active', 'issuing.card.inactive', 'issuing.card.closed', 'issuing.card.modified',
   'issuing.card.low_remaining_transaction_limit', 'issuing.transaction.succeeded', 'issuing.transaction.failed',
 ] as const;
+/** Subscriptions of interest; parsing also accepts new event names for forward compatibility. */
+export const ISSUING_EVENT_NAMES = [...VERIFIED_ISSUING_EVENT_NAMES] as const;
 export type IssuingEventName = typeof ISSUING_EVENT_NAMES[number];
 export const webhookEventSchema = z.object({
   id: z.string().min(1), name: z.string().min(1), account_id: z.string().optional(),

@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   AirwallexApiError, AirwallexClient, AirwallexResponseError, AirwallexSafetyError,
-  assertSafeCardPath, cardholderInputSchema, createCardInputSchema, loadAirwallexConfig,
+  assertSafeCardPath, cardholderInputSchema, cardRequestIdFromApproval, createCardInputSchema, loadAirwallexConfig,
   mapFailureReason,
 } from './index.js';
-import type { CreateCardInput, SimulateAuthorizationInput } from './index.js';
+import type { Amount, CreateCardInput, SimulateAuthorizationInput } from './index.js';
 
 const START = Date.parse('2030-01-01T00:00:00Z');
 function fixture(name: string): unknown {
@@ -61,6 +61,15 @@ const simulationInput: SimulateAuthorizationInput = {
 };
 function body(call: Call | undefined): unknown {
   return JSON.parse(String(call?.init.body));
+}
+function controlsWithAmount(amount: Amount) {
+  return {
+    ...cardInput.authorization_controls,
+    transaction_limits: {
+      currency: 'USD',
+      limits: [{ amount, interval: 'PER_TRANSACTION' }, { amount, interval: 'ALL_TIME' }],
+    },
+  };
 }
 
 describe('authentication', () => {
@@ -139,6 +148,47 @@ describe('authentication', () => {
 });
 
 describe('issuing methods', () => {
+  it('derives a stable request ID from an approval ID within the API length limit', () => {
+    const approvalId = 'approval_test_01'.repeat(20);
+    const requestId = cardRequestIdFromApproval(approvalId);
+    expect(cardRequestIdFromApproval(approvalId)).toBe(requestId);
+    expect(requestId).toMatch(/^sk-[a-f0-9]{40}$/);
+    expect(requestId.length).toBeLessThanOrEqual(50);
+    expect(cardRequestIdFromApproval('approval_test_02')).not.toBe(requestId);
+  });
+
+  it.each(['50.00', 50, '12.34', 12.34, '0.01', 0.01, 0.29, 1.1, 1e21])('sends numeric amounts for create, update and simulation: %s', async amount => {
+    const h = harness();
+    const controls = controlsWithAmount(amount);
+    const expected = {
+      ...controls,
+      transaction_limits: {
+        currency: 'USD',
+        limits: [{ amount: Number(amount), interval: 'PER_TRANSACTION' }, { amount: Number(amount), interval: 'ALL_TIME' }],
+      },
+    };
+    const input = { ...cardInput, authorization_controls: controls };
+    await h.client.createCard(input);
+    expect(body(h.calls.at(-1))).toEqual({ ...input, authorization_controls: expected });
+    await h.client.updateCardControls('card_test_01', controls);
+    expect(body(h.calls.at(-1))).toEqual({ authorization_controls: expected });
+    await h.client.simulateAuthorization({ ...simulationInput, transaction_amount: amount });
+    expect(body(h.calls.at(-1))).toEqual({ ...simulationInput, transaction_amount: Number(amount) });
+    expect(controls.transaction_limits.limits[0]?.amount).toBe(amount);
+  });
+
+  it.each([
+    0, -1, -0.01, NaN, Infinity, -Infinity, 1.001, 0.001,
+    '0', '0.00', '-1.00', '1.001', '0.001', '1.000', '', ' 1.00', 'NaN', 'Infinity', '1e2', '9'.repeat(400),
+  ])('rejects invalid outgoing amounts before any fetch: %s', amount => {
+    const h = harness();
+    const controls = controlsWithAmount(amount);
+    expect(() => h.client.createCard({ ...cardInput, authorization_controls: controls })).toThrow();
+    expect(() => h.client.updateCardControls('card_test_01', controls)).toThrow();
+    expect(() => h.client.simulateAuthorization({ ...simulationInput, transaction_amount: amount })).toThrow();
+    expect(h.calls).toHaveLength(0);
+  });
+
   it('routes balance, config, cardholder, card, limits and transaction reads', async () => {
     const h = harness();
     expect((await h.client.getBalances())[0]?.available_amount).toBe('1000.00');
@@ -181,7 +231,7 @@ describe('issuing methods', () => {
       form_factor: 'VIRTUAL', is_personalized: true, program: { purpose: 'COMMERCIAL' }, nick_name: 'test-purchase',
       authorization_controls: {
         allowed_transaction_count: 'MULTIPLE', allowed_currencies: ['USD'], allowed_merchant_categories: ['5734'],
-        transaction_limits: { currency: 'USD', limits: [{ amount: '50.00', interval: 'PER_TRANSACTION' }] },
+        transaction_limits: { currency: 'USD', limits: [{ amount: 50, interval: 'PER_TRANSACTION' }] },
       },
     });
   });
@@ -221,7 +271,7 @@ describe('issuing methods', () => {
     expect(result.failure_reason).toBe(outcome === 'approved' ? null : outcome.toUpperCase().replaceAll('-', '_'));
     expect(h.calls.at(-1)?.method).toBe('POST');
     expect(h.calls.at(-1)?.path).toBe('/api/v1/simulation/issuing/create');
-    expect(body(h.calls.at(-1))).toEqual(simulationInput);
+    expect(body(h.calls.at(-1))).toEqual({ ...simulationInput, transaction_amount: 20 });
   });
 
   it('blocks simulation outside sandbox even with an explicit config override', () => {
@@ -247,6 +297,33 @@ describe('issuing methods', () => {
 });
 
 describe('errors and validation', () => {
+  it('redacts the invalidated token when re-login fails after a 401', async () => {
+    const h = harness({
+      'POST /api/v1/authentication/login': (_call, count) => count === 1
+        ? json(fixture('login'))
+        : json({ code: 'DENIED_test-token-01', message: 'Expired test-token-01 test-api-key test-client-id' }, 403),
+      'GET /api/v1/balances/current': () => json({}, 401),
+    });
+    await expect(h.client.getBalances()).rejects.toMatchObject({
+      status: 403, code: 'DENIED_[redacted]', message: 'Expired [redacted] [redacted] [redacted]',
+    });
+    expect(h.counts.get('POST /api/v1/authentication/login')).toBe(2);
+    expect(h.counts.get('GET /api/v1/balances/current')).toBe(1);
+  });
+
+  it('redacts both the invalidated and current token in a retry error', async () => {
+    const h = harness({
+      'POST /api/v1/authentication/login': (_call, count) => json({ token: `test-token-0${count}`, expires_at: '2030-01-01T00:30:00Z' }),
+      'GET /api/v1/balances/current': (_call, count) => count === 1
+        ? json({}, 401)
+        : json({ code: 'DENIED_test-token-01_test-token-02', message: 'Denied test-token-01 test-token-02' }, 401),
+    });
+    await expect(h.client.getBalances()).rejects.toMatchObject({
+      status: 401, code: 'DENIED_[redacted]_[redacted]', message: 'Denied [redacted] [redacted]',
+    });
+    expect(h.counts.get('GET /api/v1/balances/current')).toBe(2);
+  });
+
   it('exposes typed API errors without request headers, body or credentials', async () => {
     const h = harness({ 'GET /api/v1/balances/current': () => json({ code: 'BAD_REQUEST', message: 'Invalid test-api-key test-client-id test-token-01', headers: { 'x-api-key': 'test-api-key' } }, 400) });
     try {

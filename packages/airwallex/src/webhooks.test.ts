@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { ISSUING_EVENT_NAMES, parseWebhookEvent, verifyWebhookSignature } from './index.js';
+import { ISSUING_EVENT_NAMES, parseWebhookEvent, VERIFIED_ISSUING_EVENT_NAMES, verifyWebhookSignature } from './index.js';
 
 const nowMs = Date.parse('2030-01-01T00:00:00Z');
 const secret = 'test-secret';
@@ -78,10 +78,11 @@ describe('webhook parsing', () => {
     expect(() => parseWebhookEvent(input)).toThrow();
   });
 
-  it('exports the required issuing card and transaction subscriptions', () => {
-    expect(ISSUING_EVENT_NAMES).toEqual(expect.arrayContaining([
+  it('exports only confirmed issuing card and transaction subscriptions', () => {
+    expect(VERIFIED_ISSUING_EVENT_NAMES).toEqual([
       'issuing.card.active', 'issuing.card.inactive', 'issuing.card.closed', 'issuing.card.modified',
       'issuing.card.low_remaining_transaction_limit', 'issuing.transaction.succeeded', 'issuing.transaction.failed',
-    ]));
+    ]);
+    expect(ISSUING_EVENT_NAMES).toEqual(VERIFIED_ISSUING_EVENT_NAMES);
   });
 });

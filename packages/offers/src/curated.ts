@@ -2,10 +2,8 @@ import { readFixture } from './fixtures.js';
 import { OfferListSchema, OfferSchema, type Offer } from './offer.js';
 import { filterOffers, type OfferQuery, type OfferSource } from './source.js';
 
-const GOAT_MARKER = 'goat';
-
 function isGoatOffer(offer: Offer): boolean {
-  return `${offer.id} ${offer.vendor} ${offer.product}`.toLowerCase().includes(GOAT_MARKER);
+  return offer.vendor.toLowerCase() === 'goat';
 }
 
 /**

@@ -24,7 +24,7 @@
       "currency": "USD",
       "limits": [
         {
-          "amount": "50.00",
+          "amount": 50,
           "interval": "PER_TRANSACTION"
         }
       ]

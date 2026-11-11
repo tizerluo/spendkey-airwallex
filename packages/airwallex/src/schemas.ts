@@ -3,6 +3,11 @@ import { z } from 'zod';
 /** Amounts retain the API's decimal string or JSON number; no numeric coercion. */
 export const amountSchema = z.union([z.string().regex(/^-?\d+(?:\.\d+)?$/), z.number().finite()]);
 export type Amount = z.infer<typeof amountSchema>;
+/** Outgoing amounts must be positive, finite and have at most two decimal places. */
+export const requestAmountSchema = z.union([
+  z.string().regex(/^\d+(?:\.\d{1,2})?$/),
+  z.number().finite().positive().refine(value => Number(value.toFixed(2)) === value),
+]).refine(value => Number.isFinite(Number(value)) && Number(value) > 0);
 export const loginSchema = z.object({
   token: z.string().min(1),
   expires_at: z.string().refine(value => Number.isFinite(Date.parse(value))),
@@ -54,11 +59,16 @@ export const authorizationControlsSchema = z.object({
   transaction_limits: z.object({ currency: z.string(), limits: z.array(transactionLimitSchema).min(1) }),
 });
 export type AuthorizationControls = z.infer<typeof authorizationControlsSchema>;
+export const authorizationControlsInputSchema = authorizationControlsSchema.extend({
+  transaction_limits: authorizationControlsSchema.shape.transaction_limits.extend({
+    limits: z.array(transactionLimitSchema.extend({ amount: requestAmountSchema })).min(1),
+  }),
+});
 export const createCardInputSchema = z.object({
   request_id: z.string().min(1).max(50).optional(), cardholder_id: z.string().min(1),
   created_by: z.string().min(1), form_factor: z.literal('VIRTUAL'), is_personalized: z.boolean(),
   program: z.object({ purpose: z.string().min(1) }), nick_name: z.string(),
-  authorization_controls: authorizationControlsSchema,
+  authorization_controls: authorizationControlsInputSchema,
 });
 export type CreateCardInput = z.input<typeof createCardInputSchema>;
 export const cardStatusSchema = z.enum(['ACTIVE', 'INACTIVE', 'CLOSED']);
@@ -86,7 +96,7 @@ export const merchantInfoSchema = z.object({
   name: z.string().optional(), city: z.string().optional(), country: z.string().optional(),
 }).catchall(z.string());
 export const simulationInputSchema = z.object({
-  card_id: z.string(), transaction_amount: amountSchema, transaction_currency: z.string(),
+  card_id: z.string(), transaction_amount: requestAmountSchema, transaction_currency: z.string(),
   merchant_category_code: z.string(), merchant_info: merchantInfoSchema.optional(),
 });
 export type SimulateAuthorizationInput = z.input<typeof simulationInputSchema>;
