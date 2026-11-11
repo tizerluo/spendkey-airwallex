@@ -1,0 +1,1 @@
+{"id":"event_independent_01","name":"issuing.card.closed","account_id":"account_test_01","data":{"card_id":"card_test_01","card_status":"CLOSED"},"created_at":"2030-01-01T00:00:00Z"}

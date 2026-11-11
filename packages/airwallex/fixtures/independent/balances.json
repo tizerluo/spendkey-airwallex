@@ -1,0 +1,11 @@
+[
+  {
+    "currency": "USD",
+    "available_amount": "250.00",
+    "pending_amount": 0,
+    "reserved_amount": "0.00",
+    "total_amount": 250,
+    "prepayment_amount": 0,
+    "account_type": "CURRENT"
+  }
+]
