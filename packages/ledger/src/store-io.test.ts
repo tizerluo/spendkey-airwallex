@@ -1,4 +1,4 @@
-import { appendFileSync, constants, fsyncSync, mkdtempSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, fsyncSync, mkdtempSync, openSync, readFileSync, rmSync, unlinkSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +7,8 @@ import type { CardAuditEvent } from './events.js';
 
 vi.mock('node:fs', async importOriginal => {
   const fs = await importOriginal<typeof import('node:fs')>();
-  return { ...fs, openSync: vi.fn(fs.openSync), appendFileSync: vi.fn(fs.appendFileSync), fsyncSync: vi.fn(fs.fsyncSync) };
+  return { ...fs, openSync: vi.fn(fs.openSync), appendFileSync: vi.fn(fs.appendFileSync), fsyncSync: vi.fn(fs.fsyncSync),
+    closeSync: vi.fn(fs.closeSync), unlinkSync: vi.fn(fs.unlinkSync), readFileSync: vi.fn(fs.readFileSync) };
 });
 
 const event: CardAuditEvent = { kind: 'webhook_received', eventId: 'event_test_01', name: 'test', deduped: false };
@@ -46,6 +47,25 @@ describe('durability and uncertain writes', () => {
     expect(readFileSync(path, 'utf8')).toBe(`${before}{"seq":`);
     expect(() => ledger.append(event)).toThrow('ledger_closed');
     expect(() => openJsonlLedger(path)).toThrow('ledger_incomplete_final_line');
+  });
+
+  it('preserves the operation error when both lock cleanup steps fail', async () => {
+    const path = file();
+    const ledger = openJsonlLedger(path);
+    const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    vi.mocked(readFileSync).mockImplementationOnce(() => { throw new Error('synthetic_read_failure'); });
+    vi.mocked(closeSync).mockImplementationOnce(fd => { fs.closeSync(fd); throw new Error('synthetic_close_failure'); });
+    vi.mocked(unlinkSync).mockImplementationOnce(lock => { fs.unlinkSync(lock); throw new Error('synthetic_unlink_failure'); });
+    expect(() => ledger.read()).toThrow(/^synthetic_read_failure$/);
+    expect(ledger.read()).toEqual([]);
+  });
+
+  it('reports cleanup failure after a successful operation', async () => {
+    const ledger = openJsonlLedger(file());
+    const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    vi.mocked(closeSync).mockImplementationOnce(fd => { fs.closeSync(fd); throw new Error('synthetic_close_failure'); });
+    expect(() => ledger.read()).toThrow(/^ledger_lock_cleanup_failed$/);
+    expect(ledger.read()).toEqual([]);
   });
 
   it('requires reopening after an fsync failure and retains the written event', () => {

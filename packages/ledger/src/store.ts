@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, constants, fsyncSync, openSync, readFileSync, unlinkSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, fsyncSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { appendEvent, assertValidChain, parseJsonl } from './chain.js';
 import type { CardAuditEvent, LedgerEvent } from './events.js';
@@ -44,23 +44,62 @@ export function openInMemoryLedger(events: readonly LedgerEvent[] = []): LedgerS
 /**
  * Synchronous, local-filesystem store. Every operation uses an exclusive sibling
  * lock and rereads the chain, so separate processes never append a stale head.
- * Lock contention fails immediately; a crashed writer's lock requires operator
- * recovery after verifying the ledger. No history is repaired or truncated.
+ * Lock acquisition retries for at most 200ms, recovering dead/expired owners.
+ * No history is repaired or truncated.
  */
 export function openJsonlLedger(path: string): LedgerStore {
   const file = resolve(path);
   const lock = `${file}.lock`;
   let closed = false;
 
+  function acquireLock(): number {
+    for (let attempt = 0; attempt <= 40; attempt += 1) {
+      let fd: number | undefined;
+      try {
+        fd = openSync(lock, 'wx', 0o600);
+        writeSync(fd, `${process.pid}\n`);
+        return fd;
+      } catch (error) {
+        if (fd !== undefined) {
+          try { closeSync(fd); } catch { /* Preserve acquisition failure. */ }
+          try { unlinkSync(lock); } catch { /* Preserve acquisition failure. */ }
+          throw new Error('ledger_lock_unavailable');
+        }
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new Error('ledger_lock_unavailable');
+      }
+      try {
+        const before = statSync(lock);
+        const owner = readFileSync(lock, 'utf8').trim();
+        let stale = Date.now() - before.mtimeMs > 30_000;
+        if (!stale && /^[1-9]\d*$/.test(owner) && Number.isSafeInteger(Number(owner))) {
+          try { process.kill(Number(owner), 0); }
+          catch (error) { stale = (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+        }
+        const current = statSync(lock);
+        if (stale && before.ino === current.ino && before.mtimeMs === current.mtimeMs) {
+          unlinkSync(lock);
+          continue;
+        }
+      } catch { /* Another process may have released the lock; retry below. */ }
+      if (attempt < 40) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+    throw new Error('ledger_lock_unavailable');
+  }
+
   function withLock<T>(operation: () => T): T {
     if (closed) throw new Error('ledger_closed');
-    let lockFd: number;
-    try { lockFd = openSync(lock, 'wx', 0o600); }
-    catch { throw new Error('ledger_lock_unavailable'); }
-    try { return operation(); }
-    finally {
-      try { closeSync(lockFd); } finally { unlinkSync(lock); }
-    }
+    const lockFd = acquireLock();
+    let failed = false;
+    let operationError: unknown;
+    let result!: T;
+    try { result = operation(); }
+    catch (error) { failed = true; operationError = error; }
+    let cleanupFailed = false;
+    try { closeSync(lockFd); } catch { cleanupFailed = true; }
+    try { unlinkSync(lock); } catch { cleanupFailed = true; }
+    if (failed) throw operationError;
+    if (cleanupFailed) throw new Error('ledger_lock_cleanup_failed');
+    return result;
   }
 
   // a+ creates the file if absent and sets O_APPEND without truncation.

@@ -16,7 +16,7 @@ const record = ledger.append({
 console.log(record.seq, verifyChain(ledger.read()).ok);
 ledger.close();
 
-signedDecimalToMinor('-2.50'); // -250 cents, for refunds/reversals
+signedDecimalToMinor('-2.50', 'USD'); // -250 cents, for refunds/reversals
 ```
 
 `openInMemoryLedger()` and `new InMemoryLedgerStore(initialEvents?)` implement
@@ -65,12 +65,13 @@ determine whether the event was written before retrying.
 
 For multiple processes, all access must use this store and the same absolute
 file path on a local filesystem. An exclusive sibling `<file>.lock` serializes
-each operation; contention throws `ledger_lock_unavailable` immediately, so
-the caller can retry later. After a process crash, stop all writers and verify
-the file before an operator removes a stale lock. The store never removes a
-preexisting lock, repairs a partial record, or truncates history. Treat the
-ledger directory and path as trusted; external replacement or truncation is
-outside this coordination protocol.
+each operation. The lock records its owner's PID. Acquisition retries every 5ms
+for up to 200ms, then throws `ledger_lock_unavailable`. A dead owner or a lock
+older than 30 seconds permits stale-lock recovery. Operations must complete
+within that lease. Ledger and lock paths must be on a trusted local filesystem;
+external replacement or truncation is outside this coordination protocol.
+Cleanup attempts both close and unlink and preserves the original operation
+error if cleanup also fails. History is never repaired or truncated.
 
 A chain detects modified lines, reordering, duplicates and deletion before a
 retained successor. Deleting a complete suffix leaves a valid shorter chain;
@@ -78,30 +79,68 @@ detecting that requires retaining the previous head hash/count independently.
 Likewise, an attacker who can rewrite the whole file can recompute its hashes.
 This is an integrity chain, not a signature or external checkpoint service.
 
-Before validation or writing, the redaction guard checks nested keys and values
-for PAN-like runs of 13 or more digits (including space/hyphen separated runs),
-CVV indicators, bearer credentials, API key/secret/token indicators and common
-secret shapes. It rejects instead of silently removing data, with a generic
-error that contains no input. Only masked card numbers belong in events; never
-pass full card details or credentials to the ledger. Unknown raw payloads must
-already be redacted by the caller. Detection is conservative and can reject
-innocent text or identifiers with these shapes; it cannot recognize every
-unlabelled credential. Runtime credentials stay outside this package.
+`redactValue(value)` deep clones response data, drops sensitive keys, and replaces
+flagged strings (or numeric PANs) with `"[REDACTED]"`. It retains
+`masked_card_number`, checking the value for unmasked PANs. Sensitive keys include
+PAN/card number, CVV/CVC, tokens, secrets, passwords, authorization, cookies, API
+keys and private keys. Values are checked for standalone 13–19 digit PAN groups
+with a Luhn checksum, Basic/bearer credentials, JWTs and common
+secret indicators/shapes. Hex hashes, UUIDs, ISO timestamps, epoch-ms values and
+`spk_` request IDs are accepted. Unlabelled credentials cannot all be recognized.
 
-`signedDecimalToMinor(string | number)` parses optional minus signs and up to
-two decimal places into safe integer cents. It accepts leading zeroes, rejects
-exponents, whitespace, plus signs, rounding and unsafe integers, and normalizes
-negative zero. Prefer decimal strings from transaction responses. Like the
-existing policy money helper, it assumes two decimal places; other currency
-scales require an explicit conversion at the integration boundary.
+Append automatically sanitizes `raw_response.body` and `card_issued.controls`,
+then runs `assertRedacted` as a final fail-closed guard on the entire event before
+validation or writing. Other fields and unknown properties remain guarded.
+Callers must use `redactValue` for tolerant handling of response-derived optional
+card fields before building an issuance event. Never copy exception messages or
+raw response text into an unconfirmed reason. If a response cannot be confirmed,
+append `card_issue_unconfirmed` with a fixed reason such as
+`response_shape_unconfirmed` and the safe reference to the stored raw response:
+
+```ts
+import { redactValue } from '@sk/ledger';
+
+ledger.append({
+  kind: 'raw_response', ref: 'response_test_01', endpoint: '/test/cards/create',
+  status: 200, body: redactValue(responseBody),
+});
+ledger.append({
+  kind: 'card_issue_unconfirmed', approvalId: 'approval_test_01',
+  requestId: 'spk_test_01', reason: 'response_shape_unconfirmed',
+  rawResponseRef: 'response_test_01',
+});
+```
+
+Only synthetic masked card details belong in examples; runtime credentials stay
+outside this package. Invalid JSON values and cycles are rejected with safe
+errors by both the sanitizer and guard.
+
+`signedDecimalToMinor(value, currency)` parses optional minus signs into safe
+integer minor units using the currency exponent. Zero decimals: BIF, CLP, DJF,
+GNF, ISK, JPY, KMF, KRW, PYG, RWF, UGX, UYI, VND, VUV, XAF, XOF, XPF. Three
+decimals: KWD, BHD, OMR, JOD, TND, IQD, LYD. Other uppercase three-letter codes
+use two decimals. Leading zeroes are accepted; exponents, whitespace, plus signs,
+excess precision and unsafe integers are rejected. Negative zero is normalized.
+Authorization amounts and nested offer prices are validated against their
+currency using the same conversion. Prefer decimal strings from responses.
 
 Build and verify a file from the repository root:
 
 ```sh
 pnpm --filter @sk/ledger build
 node packages/ledger/dist/cli.js verify ./cards.jsonl
+# Optional external anchors retained from a previous successful verification:
+node packages/ledger/dist/cli.js verify ./cards.jsonl --expect-head <hash> --expect-seq <seq>
 pnpm --filter @sk/ledger test
 ```
+
+`verifyJsonl(text, { expectHead?, expectSeq? })` returns diagnostics and the final
+`head: { seq, hash }` on success. An empty file has `{ seq: -1, hash: ZERO_HASH }`.
+The CLI prints the same head and accepts `--expect-head <hash>` (`--head` alias)
+and `--expect-seq <seq>` to detect a removed suffix. Incomplete tails return
+`{ ok: false, error: 'incomplete_final_line', brokenAt }`, where `brokenAt` is the
+zero-based partial line index; strict store open/append continues to reject them.
+Other parse and integrity failures also report a safe error and record index.
 
 The CLI is read-only, prints JSON and exits `0` for a valid file, `1` for
 integrity, parsing, usage or I/O failures. It does not create missing files or

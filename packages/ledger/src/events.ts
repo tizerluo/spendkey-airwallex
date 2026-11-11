@@ -8,12 +8,9 @@ const currency = z.string().regex(/^[A-Z]{3}$/);
 const mcc = z.string().regex(/^\d{4}$/);
 const rail = z.enum(['card', 'x402']);
 const requiredUnknown = z.unknown().refine(value => value !== undefined, 'required_json_value');
-const signedAmount = z.string().refine(value => {
-  try { signedDecimalToMinor(value); return true; } catch { return false; }
-}, 'invalid_signed_decimal');
 
 /** The M3 card contract, independent of the frozen @sr/schema audit union. */
-export const CardAuditEventSchema = z.discriminatedUnion('kind', [
+const CardAuditEventUnion = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('offers_snapshot'), intent: z.string(),
     offers: z.array(z.object({
@@ -65,7 +62,7 @@ export const CardAuditEventSchema = z.discriminatedUnion('kind', [
   }).strict(),
   z.object({
     kind: z.literal('authorization'), source: z.enum(['simulated', 'observed']),
-    cardId: text, amount: signedAmount, currency, merchantCategoryCode: mcc.optional(),
+    cardId: text, amount: z.string(), currency, merchantCategoryCode: mcc.optional(),
     merchantName: z.string().optional(), processResult: z.string().optional(), failureReason: z.string().optional(),
     mapped: z.enum(['approved', 'limit_exceeded', 'merchant_category_not_allowed', 'currency_not_allowed', 'card_inactive', 'other']),
     transactionId: text.optional(),
@@ -79,6 +76,18 @@ export const CardAuditEventSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('webhook_received'), eventId: text, name: text, deduped: z.boolean() }).strict(),
   z.object({ kind: z.literal('raw_response'), ref: text, endpoint: text, status: z.number().int().min(100).max(599), body: requiredUnknown }).strict(),
 ]);
+
+// Keep the discriminated union intact, then validate paired amount/currency data.
+export const CardAuditEventSchema = CardAuditEventUnion.superRefine((event, context) => {
+  const amounts = event.kind === 'authorization' ? [{ value: event.amount, currency: event.currency, path: ['amount'] }]
+    : event.kind === 'offers_snapshot' ? event.offers.map((offer, index) => ({
+      value: offer.price.amount, currency: offer.price.currency, path: ['offers', index, 'price', 'amount'],
+    })) : [];
+  for (const amount of amounts) {
+    try { signedDecimalToMinor(amount.value, amount.currency); }
+    catch { context.addIssue({ code: z.ZodIssueCode.custom, message: 'invalid_signed_decimal', path: amount.path }); }
+  }
+});
 
 // Zod 3 infers unknown properties as optional, even with the runtime required
 // refinement. Keep the public contract's controls/body fields required.

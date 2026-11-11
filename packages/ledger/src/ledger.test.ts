@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { canonicalize, ZERO_HASH } from '@sr/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  appendEvent, CardAuditEventSchema, InMemoryLedgerStore, openInMemoryLedger,
+  appendEvent, assertRedacted, CardAuditEventSchema, InMemoryLedgerStore, openInMemoryLedger,
   openJsonlLedger, parseJsonl, signedDecimalToMinor, verifyChain,
 } from './index.js';
 import type { CardAuditEvent, LedgerEvent, LedgerStore } from './index.js';
@@ -195,7 +195,7 @@ describe('append-only JSONL', () => {
     const store = openJsonlLedger(file);
     store.append(basic, AT);
     const before = readFileSync(file, 'utf8');
-    writeFileSync(`${file}.lock`, '');
+    writeFileSync(`${file}.lock`, `${process.pid}\n`);
     expect(() => store.append(basic, AT)).toThrow('ledger_lock_unavailable');
     expect(() => openJsonlLedger(file)).toThrow('ledger_lock_unavailable');
     expect(readFileSync(file, 'utf8')).toBe(before);
@@ -252,11 +252,11 @@ describe('append-only JSONL', () => {
 });
 
 describe('redaction before storage', () => {
-  const syntheticDigits = '9'.repeat(16);
+  // Published synthetic test PAN, assembled to avoid resembling a real fixture.
+  const syntheticDigits = ['4111', '1111', '1111', '1111'];
   const sensitive: unknown[] = [
-    syntheticDigits, '9'.repeat(13), '9'.repeat(19), '9'.repeat(20), Number('9'.repeat(13)),
-    ['9'.repeat(4), '9'.repeat(4), '9'.repeat(4), '9'.repeat(4)].join(' '),
-    ['9'.repeat(4), '9'.repeat(4), '9'.repeat(4), '9'.repeat(4)].join('-'),
+    syntheticDigits.join(''), syntheticDigits.join(' '), syntheticDigits.join('-'),
+    Number(syntheticDigits.join('')),
     { cvv: '000' }, { CVV: '000' }, { note: 'cvv must be removed' },
     { auth: 'Bearer synthetic-value' }, { auth: 'bearer\nsynthetic-value' },
     { api_key: 'test-value' }, { apiKey: 'test-value' }, { 'x-api-key': 'test-value' },
@@ -267,7 +267,8 @@ describe('redaction before storage', () => {
     const file = tempFile();
     const stores = [openInMemoryLedger(), openJsonlLedger(file)];
     for (const store of stores) {
-      const event: CardAuditEvent = { kind: 'raw_response', ref: 'response_test_01', endpoint: '/test', status: 200, body };
+      expect(() => assertRedacted(body)).toThrow(/^ledger_redaction_required$/);
+      const event = { ...basic, hidden: body } as CardAuditEvent;
       expect(() => store.append(event, AT)).toThrow(/^ledger_redaction_required$/);
       expect(store.read()).toEqual([]);
     }
@@ -294,16 +295,16 @@ describe('redaction before storage', () => {
   });
 });
 
-describe('signed decimal cents', () => {
+describe('signed decimal minor units', () => {
   it.each([
     ['0', 0], ['-0.00', 0], ['000.07', 7], ['1', 100], ['12.3', 1230], ['-12.34', -1234],
     ['-0.01', -1], [-0.29, -29], [25, 2500], ['90071992547409.91', Number.MAX_SAFE_INTEGER],
     ['-90071992547409.91', -Number.MAX_SAFE_INTEGER],
-  ] as const)('parses %s exactly', (value, expected) => { expect(signedDecimalToMinor(value)).toBe(expected); });
+  ] as const)('parses %s exactly', (value, expected) => { expect(signedDecimalToMinor(value, 'USD')).toBe(expected); });
 
   it.each(['', ' 1', '1 ', '+1', '1e2', '.5', '1.', '1.001', '--1', '1,000',
     '90071992547409.92', '-90071992547409.92', NaN, Infinity, -Infinity, 1e21, 0.1 + 0.2])('rejects %s', value => {
-    expect(() => signedDecimalToMinor(value)).toThrow(RangeError);
+    expect(() => signedDecimalToMinor(value, 'USD')).toThrow(RangeError);
   });
 });
 
@@ -314,7 +315,7 @@ describe('offline verify CLI', () => {
     writeFileSync(file, before);
     const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../dist/cli.js', import.meta.url)), 'verify', file], { encoding: 'utf8' });
     expect(cli.status).toBe(0);
-    expect(JSON.parse(cli.stdout)).toEqual({ ok: true });
+    expect(JSON.parse(cli.stdout)).toEqual({ ok: true, head: { seq: events.length - 1, hash: chain().at(-1)!.hash } });
     expect(cli.stderr).toBe('');
     expect(readFileSync(file, 'utf8')).toBe(before);
   });
@@ -326,7 +327,7 @@ describe('offline verify CLI', () => {
     writeFileSync(file, jsonl(records));
     const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../dist/cli.js', import.meta.url)), 'verify', file], { encoding: 'utf8' });
     expect(cli.status).toBe(1);
-    expect(JSON.parse(cli.stdout)).toEqual({ ok: false, error: 'ledger_verification_failed' });
+    expect(JSON.parse(cli.stdout)).toEqual({ ok: false, error: 'hash_mismatch', brokenAt: 1 });
     expect(cli.stderr).toBe('');
   });
 
