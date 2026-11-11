@@ -1,4 +1,4 @@
-import { cardRequestIdFromApproval, createCardInputSchema } from '@sk/airwallex';
+import { cardNicknameFromRequestId, cardRequestIdFromApproval, createCardInputSchema } from '@sk/airwallex';
 import type { AuthorizationControls, CreateCardInput } from '@sk/airwallex';
 import { ApprovalError, termsHash } from './approval.js';
 import type { Approval } from './approval.js';
@@ -12,7 +12,11 @@ export function assertControlsCurrency(controls: AuthorizationControls): void {
   }
 }
 
-export interface CardInputOptions { cardholderId: string; createdBy: string; nickName?: string }
+export interface CardInputOptions {
+  cardholderId: string; createdBy: string;
+  /** @deprecated Ignored: issuance uses a deterministic request-ID nickname for recovery. */
+  nickName?: string;
+}
 
 export function approvalToCardInput(approval: Approval, options: CardInputOptions): CreateCardInput {
   const request = approval.request;
@@ -32,10 +36,11 @@ export function approvalToCardInput(approval: Approval, options: CardInputOption
     transaction_limits: { currency: request.currency, limits: [{ amount, interval: request.interval }] },
   };
   assertControlsCurrency(authorizationControls);
+  const requestId = cardRequestIdFromApproval(approval.approvalId);
   const input: CreateCardInput = {
-    request_id: cardRequestIdFromApproval(approval.approvalId), cardholder_id: options.cardholderId,
+    request_id: requestId, cardholder_id: options.cardholderId,
     created_by: options.createdBy, form_factor: 'VIRTUAL', is_personalized: true,
-    program: { purpose: 'COMMERCIAL' }, nick_name: options.nickName ?? request.product,
+    program: { purpose: 'COMMERCIAL' }, nick_name: cardNicknameFromRequestId(requestId),
     authorization_controls: authorizationControls,
   };
   createCardInputSchema.parse(input);

@@ -1,6 +1,6 @@
 import { createCuratedSource, createX402SnapshotSource, type Offer } from '@sk/offers';
 import { describe, expect, it } from 'vitest';
-import type { Candidate, UsageProfile } from './candidate.js';
+import { CandidateSchema, type Candidate, type UsageProfile } from './candidate.js';
 import { compareOffers, toCandidate } from './compare.js';
 
 const PRICE_UNVERIFIED_NOTE = 'price_unverified: amount shown, no savings claim';
@@ -286,5 +286,14 @@ describe('compareOffers: exclusions and currencies', () => {
         (candidate) => !candidate.notes.some((note) => note.includes('mixed currencies')),
       ),
     ).toBe(true);
+  });
+});
+
+describe('candidate rail validation', () => {
+  it('rejects an x402 snapshot relabelled as card and accepts its original rail', async () => {
+    const offers = await designOffers();
+    const original = compareOffers(offers, { horizonMonths: 12, seats: 5 }).candidates[0]!;
+    expect(() => CandidateSchema.parse({ ...original, sourceId: 'x402-snapshot', rail: 'card' })).toThrow('rail_not_card');
+    expect(CandidateSchema.parse({ ...original, sourceId: 'x402-snapshot', rail: 'x402' }).rail).toBe('x402');
   });
 });

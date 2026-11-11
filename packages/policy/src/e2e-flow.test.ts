@@ -1,4 +1,4 @@
-import { cardRequestIdFromApproval, createCardInputSchema } from '@sk/airwallex';
+import { cardNicknameFromRequestId, cardRequestIdFromApproval, createCardInputSchema } from '@sk/airwallex';
 import type { Candidate as CompareCandidate } from '@sk/compare';
 import type { Offer } from '@sk/offers';
 import { describe, expect, it } from 'vitest';
@@ -195,7 +195,7 @@ describe('offline e2e: curated DesignCo monthly versus annual', () => {
       form_factor: 'VIRTUAL',
       is_personalized: true,
       program: { purpose: 'COMMERCIAL' },
-      nick_name: 'Team plan',
+      nick_name: cardNicknameFromRequestId(body.request_id),
       authorization_controls: {
         allowed_transaction_count: 'MULTIPLE',
         allowed_currencies: ['USD'],

@@ -49,7 +49,7 @@ function harness(overrides: Record<string, Handler> = {}, baseUrl?: string) {
   const config = loadAirwallexConfig({
     AIRWALLEX_CLIENT_ID: 'test-client-id', AIRWALLEX_API_KEY: 'test-api-key',
     ...(baseUrl === undefined ? {} : { AIRWALLEX_BASE_URL: baseUrl }),
-  }, { allowNonSandbox: true });
+  });
   const client = new AirwallexClient(config, { fetch, now: () => now });
   return { client, calls, counts, setNow: (value: number) => { now = value; } };
 }
@@ -237,7 +237,7 @@ describe('issuing methods', () => {
   it('creates the complete card body and preserves a caller-supplied request ID', async () => {
     const h = harness();
     const card = await h.client.createCard(cardInput);
-    expect(card.card_number).toBe('************0000');
+    expect(card.card?.card_number).toBe('************0000');
     expect(h.calls.at(-1)?.path).toBe('/api/v1/issuing/cards/create');
     expect(h.calls.at(-1)?.method).toBe('POST');
     expect(body(h.calls.at(-1))).toEqual({
@@ -297,10 +297,8 @@ describe('issuing methods', () => {
     expect(body(h.calls.at(-1))).toEqual({ ...simulationInput, transaction_amount: 20 });
   });
 
-  it('blocks simulation outside sandbox even with an explicit config override', () => {
-    const h = harness({}, 'https://example.com');
-    expect(() => h.client.simulateAuthorization(simulationInput)).toThrow(AirwallexSafetyError);
-    expect(h.calls).toHaveLength(0);
+  it('rejects a non-sandbox origin at configuration', () => {
+    expect(() => harness({}, 'https://example.com')).toThrow('AIRWALLEX_BASE_URL must use the sandbox host');
   });
 
   it.each(['card_test_01/details', 'card_test_01/%64etails', 'details', '../details', 'card_test_01\\details'])('blocks card details paths before login: %s', id => {

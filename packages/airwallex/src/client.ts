@@ -3,14 +3,16 @@ import type { z } from 'zod';
 import { configApiKey, isSandboxUrl } from './config.js';
 import type { AirwallexConfig } from './config.js';
 import { AirwallexApiError, AirwallexResponseError, AirwallexSafetyError } from './errors.js';
+import { redactBody } from './redact.js';
 import {
   authorizationControlsInputSchema, balancesSchema, cardholderInputSchema, cardholderSchema,
   cardLimitsSchema, cardSchema, cardStatusSchema, createCardInputSchema, issuingConfigSchema,
   loginSchema, simulationInputSchema, simulationSchema, transactionsSchema,
+  cardsPageSchema, cardNicknameFromRequestId, parseCardLenient,
 } from './schemas.js';
 import type {
   AuthorizationControls, CardStatus, CreateCardholderInput, CreateCardInput,
-  ListTransactionsInput, SimulateAuthorizationInput,
+  CardsResponse, CreateCardResult, ListCardsInput, ListTransactionsInput, SimulateAuthorizationInput,
 } from './schemas.js';
 
 export interface AirwallexClientOptions {
@@ -92,7 +94,7 @@ export class AirwallexClient {
     }
   }
 
-  async #read<T>(response: Response, schema: z.ZodType<T>): Promise<T> {
+  async #read<T>(response: Response, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<T> {
     let body: unknown;
     try { body = await response.json(); }
     catch {
@@ -109,6 +111,16 @@ export class AirwallexClient {
     }
     const parsed = schema.safeParse(body);
     if (!parsed.success) throw new AirwallexResponseError();
+    // Schemas redact unknown data; additionally scrub credential echoes in diagnostics.
+    const scrubDiagnostics = (value: unknown): void => {
+      if (value === null || typeof value !== 'object') return;
+      for (const [key, item] of Object.entries(value)) {
+        if (key === 'extra' || key === 'unparsed') {
+          (value as Record<string, unknown>)[key] = redactBody(item, text => this.#redact(text));
+        } else scrubDiagnostics(item);
+      }
+    };
+    scrubDiagnostics(parsed.data);
     return parsed.data;
   }
 
@@ -131,7 +143,7 @@ export class AirwallexClient {
     return this.#loginPromise;
   }
 
-  async #request<T>(method: 'GET' | 'POST', path: string, schema: z.ZodType<T>, body?: unknown): Promise<T> {
+  async #requestResponse(method: 'GET' | 'POST', path: string, body?: unknown): Promise<Response> {
     assertSafeCardPath(path);
     let token = await this.#token();
     const send = () => this.#send(path, {
@@ -149,7 +161,11 @@ export class AirwallexClient {
       token = await this.#token();
       response = await send();
     }
-    return this.#read(response, schema);
+    return response;
+  }
+
+  async #request<T>(method: 'GET' | 'POST', path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, body?: unknown): Promise<T> {
+    return this.#read(await this.#requestResponse(method, path, body), schema);
   }
 
   #cardPath(id: string, suffix = ''): string {
@@ -175,10 +191,59 @@ export class AirwallexClient {
   /** Callers must pass a stable request_id (see cardRequestIdFromApproval) for retries across calls. */
   createCard(input: CreateCardInput) {
     const body = createCardInputSchema.parse(input);
-    return this.#request('POST', '/api/v1/issuing/cards/create', cardSchema, {
+    return this.#createCard({
       ...body,
       authorization_controls: controlsForRequest(body.authorization_controls),
     });
+  }
+
+  async #createCard(body: unknown): Promise<CreateCardResult> {
+    const response = await this.#requestResponse('POST', '/api/v1/issuing/cards/create', body);
+    if (!response.ok) return this.#read(response, cardSchema).then(() => {
+      throw new AirwallexResponseError(); // #read always throws for non-2xx.
+    });
+    let received: unknown;
+    try {
+      const text = await response.text();
+      try { received = JSON.parse(text) as unknown; }
+      catch { received = text; }
+    } catch { received = { bodyReadFailed: true }; }
+    const raw = redactBody(received, text => this.#redact(text));
+    const strict = cardSchema.safeParse(received);
+    if (strict.success) return { ok: true, unconfirmed: false, card: strict.data, raw };
+    const card = parseCardLenient(received);
+    return { ok: true, unconfirmed: true, ...(card === undefined ? {} : { card }), raw };
+  }
+
+  /** Collect every page; malformed individual cards remain available as redacted diagnostics. */
+  async listCards(input: ListCardsInput = {}): Promise<CardsResponse> {
+    const pageSize = input.pageSize ?? 100;
+    if (!Number.isInteger(pageSize) || pageSize < 10 || pageSize > 200) throw new AirwallexSafetyError('Invalid card page size');
+    const query = new URLSearchParams({ page_size: String(pageSize) });
+    const names = { cardholderId: 'cardholder_id', createdAfter: 'from_created_at', createdBefore: 'to_created_at',
+      updatedAfter: 'from_updated_at', updatedBefore: 'to_updated_at', status: 'card_status', nickName: 'nick_name' } as const;
+    for (const key of Object.keys(names) as (keyof typeof names)[]) {
+      if (input[key] !== undefined) query.set(names[key], input[key]);
+    }
+    const result: CardsResponse = { items: [], unparsed: [] };
+    for (let page = 0; ; page++) {
+      query.set('page_num', String(page));
+      const response = await this.#request('GET', `/api/v1/issuing/cards?${query.toString()}`, cardsPageSchema);
+      for (const item of response.items) {
+        const card = parseCardLenient(item);
+        if (card) result.items.push(card);
+        else result.unparsed.push(redactBody(item, text => this.#redact(text)));
+      }
+      if (!response.has_more) return result;
+    }
+  }
+
+  async findCardByRequestId(requestId: string, input: Pick<ListCardsInput, 'cardholderId' | 'createdAfter'> = {}) {
+    const cards = await this.listCards({ ...input,
+      ...(input.createdAfter === undefined ? {} : { createdBefore: new Date(this.#now()).toISOString() }),
+    });
+    return cards.items.find(card => card.request_id === requestId)
+      ?? cards.items.find(card => card.request_id === undefined && card.nick_name === cardNicknameFromRequestId(requestId));
   }
   getCard(id: string) { return this.#request('GET', this.#cardPath(id), cardSchema); }
   getCardLimits(id: string) { return this.#request('GET', this.#cardPath(id, '/limits'), cardLimitsSchema); }

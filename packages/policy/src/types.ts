@@ -38,7 +38,7 @@ export const candidateSchema = z.object({
   priceStatus: z.enum(['verified', 'price_unverified']), availability: z.enum(['available', 'region_unavailable']),
   upfrontMinor: minorAmountSchema, perChargeMinor: minorAmountSchema,
   horizonCost: rangeSchema, monthlyRunRateMinor: rangeSchema, notes: z.array(z.string()),
-});
+}).refine(value => value.sourceId !== 'x402-snapshot' || value.rail === 'x402', 'rail_not_card');
 
 export interface KnownObligation {
   currency: string;

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { cardRequestIdFromApproval, createCardInputSchema } from '@sk/airwallex';
+import { cardNicknameFromRequestId, cardRequestIdFromApproval, createCardInputSchema } from '@sk/airwallex';
 import { describe, expect, it } from 'vitest';
 import {
   ApprovalError,
@@ -941,10 +941,14 @@ describe('independent: approval-to-card controls', () => {
   });
 
   it('rejects a zero or unrepresentable limit and accepts one cent', () => {
-    expect(() => approved({ perChargeMinor: 0 })).toThrow();
+    expect(() => approved({ perChargeMinor: 0 })).toThrow(expect.objectContaining({
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'too_small', path: ['amountMinor'] })]),
+    }));
     const zero = approved();
     zero.request.amountMinor = 0;
-    expect(() => approvalToCardInput(zero, CARD_OPTIONS)).toThrow();
+    expect(() => approvalToCardInput(zero, CARD_OPTIONS)).toThrow(expect.objectContaining({
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'too_small', path: ['amountMinor'] })]),
+    }));
 
     const maximum = approved({ perChargeMinor: MAX_SAFE });
     expect(() => approvalToCardInput(maximum, CARD_OPTIONS)).toThrow(
@@ -992,12 +996,12 @@ describe('independent: approval-to-card controls', () => {
     expect({ input, request, approval, options }).toEqual(before);
   });
 
-  it('uses the product as the default nick name and accepts an override', () => {
+  it('uses a recoverable request id nickname even with a display-name override', () => {
     const approval = approved();
-    expect(approvalToCardInput(approval, CARD_OPTIONS).nick_name).toBe('independent-purchase');
+    expect(approvalToCardInput(approval, CARD_OPTIONS).nick_name).toBe(cardNicknameFromRequestId(cardRequestIdFromApproval(approval.approvalId)));
     const withoutNickName: CardInputOptions = { ...CARD_OPTIONS };
     delete withoutNickName.nickName;
-    expect(approvalToCardInput(approval, withoutNickName).nick_name).toBe('Test Product');
+    expect(approvalToCardInput(approval, withoutNickName).nick_name).toBe(cardNicknameFromRequestId(cardRequestIdFromApproval(approval.approvalId)));
   });
 });
 

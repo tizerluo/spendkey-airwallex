@@ -57,9 +57,7 @@ describe('config', () => {
     }
   });
 
-  it('allows a non-sandbox HTTPS origin only with explicit override', () => {
-    expect(() => loadAirwallexConfig({ ...credentials, AIRWALLEX_BASE_URL: 'https://example.com' }, { allowNonSandbox: false })).toThrow(AirwallexConfigError);
-    expect(loadAirwallexConfig({ ...credentials, AIRWALLEX_BASE_URL: 'https://example.com' }, { allowNonSandbox: true }).baseUrl).toBe('https://example.com');
+  it('normalizes a trailing slash on the sandbox origin', () => {
     expect(loadAirwallexConfig({ ...credentials, AIRWALLEX_BASE_URL: 'https://api-demo.airwallex.com/' }).baseUrl).toBe('https://api-demo.airwallex.com');
   });
 });

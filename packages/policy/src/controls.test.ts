@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cardRequestIdFromApproval, createCardInputSchema } from '@sk/airwallex';
+import { cardNicknameFromRequestId, cardRequestIdFromApproval, createCardInputSchema } from '@sk/airwallex';
 import { approvalToCardInput, approve, assertControlsCurrency, createApprovalRequest, termsHash } from './index.js';
 import type { Candidate } from './index.js';
 import { candidate } from './test-fixtures.js';
@@ -20,7 +20,7 @@ describe('approval to Airwallex controls', () => {
     expect(body).toEqual({
       request_id: cardRequestIdFromApproval('approval_test_01'), cardholder_id: 'cardholder_test_01',
       created_by: 'human_test_01', form_factor: 'VIRTUAL', is_personalized: true,
-      program: { purpose: 'COMMERCIAL' }, nick_name: 'test-purchase',
+      program: { purpose: 'COMMERCIAL' }, nick_name: cardNicknameFromRequestId(body.request_id),
       authorization_controls: {
         allowed_transaction_count: 'MULTIPLE', allowed_currencies: ['USD'], allowed_merchant_categories: ['5734'],
         transaction_limits: { currency: 'USD', limits: [{ amount: 12.34, interval: 'MONTHLY' }] },
@@ -34,7 +34,7 @@ describe('approval to Airwallex controls', () => {
   it.each(['annual', 'one_time'] as const)('maps %s to a SINGLE charge in the approved currency', plan => {
     const input = approval({ plan, currency: 'EUR' });
     const body = approvalToCardInput(input, { cardholderId: 'cardholder_test_01', createdBy: 'human_test_01' });
-    expect(body.nick_name).toBe('Test Product');
+    expect(body.nick_name).toBe(cardNicknameFromRequestId(body.request_id));
     expect(body.authorization_controls).toMatchObject({ allowed_transaction_count: 'SINGLE',
       allowed_currencies: ['EUR'], transaction_limits: { currency: 'EUR', limits: [{ amount: 50, interval: 'PER_TRANSACTION' }] } });
   });

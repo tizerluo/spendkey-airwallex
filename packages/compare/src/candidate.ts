@@ -61,6 +61,7 @@ export const CandidateSchema = z
   .refine((candidate) => candidate.availability === 'available', {
     message: 'region_unavailable offers are not candidates',
   })
+  .refine(candidate => candidate.sourceId !== 'x402-snapshot' || candidate.rail === 'x402', { message: 'rail_not_card' })
   .transform((candidate): Candidate => {
     const { merchantCategoryCode, ...rest } = candidate;
     return { ...rest, ...(merchantCategoryCode === undefined ? {} : { merchantCategoryCode }) };

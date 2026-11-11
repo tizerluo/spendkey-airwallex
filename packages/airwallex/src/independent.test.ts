@@ -55,7 +55,6 @@ type RouteHandler = (call: RecordedCall, attempt: number) => Response | Promise<
 
 interface HarnessOptions {
   baseUrl?: string;
-  allowNonSandbox?: boolean;
 }
 
 interface Harness {
@@ -95,7 +94,7 @@ function makeHarness(routes: Record<string, RouteHandler> = {}, options: Harness
     AIRWALLEX_CLIENT_ID: CLIENT_ID,
     AIRWALLEX_API_KEY: API_KEY,
     ...(options.baseUrl === undefined ? {} : { AIRWALLEX_BASE_URL: options.baseUrl }),
-  }, { allowNonSandbox: options.allowNonSandbox ?? true });
+  });
   const client = new AirwallexClient(config, { fetch: fetchImpl, now: () => current });
   return { client, config, calls, counts, setNow: (value: number) => { current = value; } };
 }
@@ -586,15 +585,10 @@ describe('independent: configuration and secret containment', () => {
     expect(String(error)).not.toContain('independent-user');
   });
 
-  it('requires allowNonSandbox to be exactly true', () => {
-    const env = {
-      AIRWALLEX_CLIENT_ID: CLIENT_ID,
-      AIRWALLEX_API_KEY: API_KEY,
-      AIRWALLEX_BASE_URL: 'https://example.com',
-    };
-    const error = thrownBy(() => loadAirwallexConfig(env, { allowNonSandbox: 1 as unknown as boolean }));
-    expect(error).toBeInstanceOf(AirwallexConfigError);
-    expect(loadAirwallexConfig(env, { allowNonSandbox: true }).baseUrl).toBe('https://example.com');
+  it('rejects a production origin without an escape hatch', () => {
+    expect(() => loadAirwallexConfig({
+      AIRWALLEX_CLIENT_ID: CLIENT_ID, AIRWALLEX_API_KEY: API_KEY, AIRWALLEX_BASE_URL: 'https://example.com',
+    })).toThrow('AIRWALLEX_BASE_URL must use the sandbox host');
   });
 });
 
@@ -648,31 +642,8 @@ describe('independent: origin and simulation guard', () => {
     }
   });
 
-  it('refuses simulation on a non-sandbox origin before any network call', () => {
-    const h = makeHarness({}, { baseUrl: 'https://api.airwallex.com' });
-    const error = thrownBy(() => h.client.simulateAuthorization(simulationInput));
-    expect(error).toBeInstanceOf(AirwallexSafetyError);
-    expect(h.calls).toHaveLength(0);
-  });
-
-  it('checks the origin before validating simulation input', () => {
-    const h = makeHarness({}, { baseUrl: 'https://api.airwallex.com' });
-    const error = thrownBy(() => h.client.simulateAuthorization({
-      card_id: '',
-      transaction_amount: 'not-an-amount',
-      transaction_currency: 'USD',
-      merchant_category_code: '',
-    }));
-    expect(error).toBeInstanceOf(AirwallexSafetyError);
-    expect(h.calls).toHaveLength(0);
-  });
-
-  it('uses an explicitly overridden origin for ordinary issuing calls', async () => {
-    const h = makeHarness({
-      'GET /api/v1/balances/current': () => json(fixture('balances')),
-    }, { baseUrl: 'https://example.com' });
-    await h.client.getBalances();
-    expect(h.calls.every(call => call.url.startsWith('https://example.com/'))).toBe(true);
+  it('refuses a non-sandbox client before any fetch, including ordinary reads', () => {
+    expect(() => makeHarness({}, { baseUrl: 'https://api.airwallex.com' })).toThrow(AirwallexConfigError);
   });
 
   it('refuses sandbox URLs that carry credentials, paths, queries or fragments', () => {
@@ -946,6 +917,7 @@ describe('independent: card details containment', () => {
       'AirwallexConfigError',
       'AirwallexResponseError',
       'AirwallexSafetyError',
+      'CARD_NICKNAME_MAX_LENGTH',
       'ISSUING_EVENT_NAMES',
       'VERIFIED_ISSUING_EVENT_NAMES',
       'amountSchema',
@@ -955,11 +927,13 @@ describe('independent: card details containment', () => {
       'balanceSchema',
       'balancesSchema',
       'cardLimitsSchema',
+      'cardNicknameFromRequestId',
       'cardRequestIdFromApproval',
       'cardSchema',
       'cardStatusSchema',
       'cardholderInputSchema',
       'cardholderSchema',
+      'cardsPageSchema',
       'createCardInputSchema',
       'isSandboxUrl',
       'issuingConfigSchema',
@@ -967,6 +941,7 @@ describe('independent: card details containment', () => {
       'loginSchema',
       'mapFailureReason',
       'merchantInfoSchema',
+      'parseCardLenient',
       'parseWebhookEvent',
       'requestAmountSchema',
       'simulationInputSchema',
@@ -1286,7 +1261,7 @@ describe('independent: response hardening', () => {
     ]);
   });
 
-  it('rejects an unmasked card number without echoing it', async () => {
+  it('drops an unmasked card number and flags it without losing the card', async () => {
     const h = makeHarness({
       'GET /api/v1/issuing/cards/card_test_01': () => json({
         card_id: 'card_test_01',
@@ -1294,9 +1269,9 @@ describe('independent: response hardening', () => {
         card_number: '4000000000000000',
       }),
     });
-    const error = await h.client.getCard('card_test_01').catch((reason: unknown) => reason);
-    expect(error).toBeInstanceOf(AirwallexResponseError);
-    expectNoMarker(error, '4000000000000000');
+    const card = await h.client.getCard('card_test_01');
+    expect(card).toEqual({ card_id: 'card_test_01', card_status: 'ACTIVE', panLikeValueDropped: true });
+    expectNoMarker(card, '4000000000000000');
   });
 
   it('surfaces an unknown decline reason unchanged and maps it to other', async () => {
