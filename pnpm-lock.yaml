@@ -68,6 +68,13 @@ importers:
       zod:
         specifier: 3.25.76
         version: 3.25.76
+    devDependencies:
+      '@sk/compare':
+        specifier: workspace:*
+        version: link:../compare
+      '@sk/offers':
+        specifier: workspace:*
+        version: link:../offers
 
   packages/schema:
     dependencies:

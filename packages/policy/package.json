@@ -10,5 +10,6 @@
     "typecheck": "pnpm --filter @sk/airwallex build && pnpm --filter @sr/core build && tsc --noEmit",
     "lint": "eslint ."
   },
-  "dependencies": { "zod": "3.25.76", "@sk/airwallex": "workspace:*", "@sr/core": "workspace:*" }
+  "dependencies": { "zod": "3.25.76", "@sk/airwallex": "workspace:*", "@sr/core": "workspace:*" },
+  "devDependencies": { "@sk/compare": "workspace:*", "@sk/offers": "workspace:*" }
 }
