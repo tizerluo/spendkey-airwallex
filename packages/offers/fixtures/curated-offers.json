@@ -1,0 +1,140 @@
+[
+  {
+    "id": "curated-x-api-credits",
+    "sourceId": "curated",
+    "vendor": "X",
+    "product": "API credits",
+    "plan": "usage",
+    "category": "social-api",
+    "merchantCategoryCode": "7372",
+    "price": {
+      "amount": "0.0100",
+      "currency": "USD",
+      "unit": "per_call"
+    },
+    "commitmentMonths": 0,
+    "cancellation": "Prepaid credits; unused credits are non-refundable",
+    "priceStatus": "price_unverified",
+    "availability": "available",
+    "sourceUrl": "https://example.com/x-api-credits",
+    "capturedAt": "2026-10-20T00:00:00.000Z",
+    "notes": "Synthetic usage-based credit example. Not a live X price."
+  },
+  {
+    "id": "curated-opencode-go-monthly",
+    "sourceId": "curated",
+    "vendor": "OpenCode",
+    "product": "Go subscription",
+    "plan": "monthly",
+    "category": "developer-tools",
+    "merchantCategoryCode": "7372",
+    "price": {
+      "amount": "15.00",
+      "currency": "USD",
+      "unit": "per_month"
+    },
+    "seats": 1,
+    "commitmentMonths": 0,
+    "cancellation": "Cancel anytime; access ends at the end of the paid month",
+    "renewal": "Renews monthly until cancelled",
+    "priceStatus": "price_unverified",
+    "availability": "available",
+    "sourceUrl": "https://example.com/opencode-go",
+    "capturedAt": "2026-10-20T00:00:00.000Z",
+    "notes": "Synthetic monthly subscription example."
+  },
+  {
+    "id": "curated-goat-pro-monthly",
+    "sourceId": "curated",
+    "vendor": "GOAT",
+    "product": "Pro plan",
+    "plan": "monthly",
+    "category": "commerce",
+    "merchantCategoryCode": "7372",
+    "price": {
+      "amount": "29.00",
+      "currency": "USD",
+      "unit": "per_month"
+    },
+    "seats": 1,
+    "commitmentMonths": 0,
+    "cancellation": "Cancel anytime",
+    "renewal": "Renews monthly",
+    "priceStatus": "verified",
+    "availability": "available",
+    "sourceUrl": "https://example.com/goat-pro",
+    "capturedAt": "2026-10-20T00:00:00.000Z",
+    "notes": "Fixture deliberately claims verified so the source can prove it forces GOAT to price_unverified."
+  },
+  {
+    "id": "curated-openai-api",
+    "sourceId": "curated",
+    "vendor": "OpenAI",
+    "product": "API access",
+    "plan": "usage",
+    "category": "ai-api",
+    "merchantCategoryCode": "7372",
+    "price": {
+      "amount": "0.1500",
+      "currency": "USD",
+      "unit": "per_1k_units"
+    },
+    "commitmentMonths": 0,
+    "cancellation": "Pay as you go; no commitment",
+    "priceStatus": "price_unverified",
+    "availability": "available",
+    "regions": {
+      "billingCountries": ["US", "GB", "CA", "DE", "SG", "JP", "AU"],
+      "cardCountries": ["US", "GB", "CA", "DE", "SG", "JP", "AU"]
+    },
+    "sourceUrl": "https://example.com/openai-api",
+    "capturedAt": "2026-10-20T00:00:00.000Z",
+    "notes": "Synthetic example. HK is intentionally excluded to demonstrate a region_unavailable negative example."
+  },
+  {
+    "id": "curated-designco-team-monthly",
+    "sourceId": "curated",
+    "vendor": "DesignCo",
+    "product": "Team plan",
+    "plan": "monthly",
+    "category": "design-tools",
+    "merchantCategoryCode": "7372",
+    "price": {
+      "amount": "60.00",
+      "currency": "USD",
+      "unit": "per_month"
+    },
+    "seats": 5,
+    "commitmentMonths": 0,
+    "cancellation": "Cancel anytime",
+    "renewal": "Renews monthly",
+    "priceStatus": "price_unverified",
+    "availability": "available",
+    "sourceUrl": "https://example.com/designco-team",
+    "capturedAt": "2026-10-20T00:00:00.000Z",
+    "notes": "Synthetic demo: 5 seats at 12.00 USD per seat per month, no long-term commitment."
+  },
+  {
+    "id": "curated-designco-team-annual",
+    "sourceId": "curated",
+    "vendor": "DesignCo",
+    "product": "Team plan",
+    "plan": "annual",
+    "category": "design-tools",
+    "merchantCategoryCode": "7372",
+    "price": {
+      "amount": "600.00",
+      "currency": "USD",
+      "unit": "per_year"
+    },
+    "seats": 5,
+    "commitmentMonths": 12,
+    "cancellation": "Refundable within 14 days; otherwise non-refundable",
+    "renewal": "Renews annually",
+    "priceStatus": "price_unverified",
+    "availability": "available",
+    "sourceUrl": "https://example.com/designco-team",
+    "capturedAt": "2026-10-20T00:00:00.000Z",
+    "notes": "Synthetic demo: 600.00 USD upfront versus 720.00 USD over 12 monthly payments; cheaper total, larger cash outlay."
+  }
+]
