@@ -40,6 +40,26 @@ describe('agent trust boundary', () => {
     expect(decision.kind === 'decision' && decision.ruleResults.some(rule => rule.offerId.includes('annual') && rule.code === 'reserve_breach')).toBe(true);
     expect(verifyChain(ledger.read()).ok).toBe(true);
   });
+  it('records complete policy-produced card terms and timestamps the decision after spend reconciliation', async () => {
+    const ledger = new InMemoryLedgerStore(); const ctx = context();
+    let current = new Date('2026-11-11T10:00:00.000Z'); ctx.now = () => current;
+    ctx.spentInWindowMinor = () => {
+      current = new Date('2026-11-11T10:00:01.000Z');
+      ledger.append({ kind: 'raw_response', ref: 'ref_test_spend', endpoint: 'test/reconciliation', status: 200, body: {} }, current.toISOString());
+      return 0;
+    };
+    const result = await runAgent({ intent: 'design tool', usage: { horizonMonths: 12 }, ctx,
+      sources: [createCuratedSource()], ledger, approvalService: { submit: async () => ({ id: 'submitted_test' }) } });
+    expect(result.request?.createdAt).toBe(current.toISOString());
+    expect(ledger.read()[1]?.event).toMatchObject({ kind: 'comparison', candidates: expect.arrayContaining([
+      expect.objectContaining({ offerId: result.request?.offerId, terms: {
+        vendor: 'DesignCo', product: expect.any(String), plan: 'monthly', currency: 'USD', amountMinor: 6000,
+        interval: 'MONTHLY', allowedTransactionCount: 'MULTIPLE', merchantCategoryCode: '7372',
+        commitmentMonths: 0, priceStatus: 'price_unverified',
+      } }),
+    ]) });
+    expect(verifyChain(ledger.read()).ok).toBe(true);
+  });
   it('uses reconciled spend from the injected provider and never requests a refused offer', async () => {
     const ctx = context(); ctx.spentInWindowMinor = () => 100_000;
     const submit = vi.fn();

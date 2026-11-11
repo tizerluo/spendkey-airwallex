@@ -1,6 +1,6 @@
-// 把账本记录和审批请求收成视图模型。摘要和短哈希只在这里定义。
+// Build view models from ledger records and requests; centralize summaries and short hashes.
 
-import type { CardAuditEvent, ChainVerification, LedgerEvent } from '@sk/ledger';
+import type { CardAuditEvent, ChainVerification } from '@sk/ledger';
 import { termsHash, type ApprovalRequest } from '@sk/policy';
 import { formatMinor, formatMinorRange, formatSignedDecimal } from './money.js';
 import type {
@@ -13,11 +13,26 @@ import type {
   AuditPageModel,
   IndexPageModel,
 } from './models.js';
+import {
+  controlsReadbackSummary,
+  freezeActorLabel,
+  isControlsMismatch,
+  latestRun,
+  runStartedSummary,
+  type ViewAuditEvent,
+} from './run-mode.js';
 
-/** @sk/ledger 的账本信封。服务器直接把读出的记录传进来。 */
-export type LedgerRecord = LedgerEvent;
+/** Ledger envelope with a wider event type for additive view contracts.
+ * Server LedgerEvent records are assignable to this type. */
+export interface LedgerRecord {
+  seq: number;
+  at: string;
+  prevHash: string;
+  hash: string;
+  event: ViewAuditEvent;
+}
 
-/** 服务器保存的一条审批。比较表从 events 里的账本记录拼出来。 */
+/** Server approval record; comparison rows come from ledger events. */
 export interface ApprovalRecordInput {
   approvalId: string;
   request: ApprovalRequest;
@@ -28,7 +43,7 @@ export interface ApprovalRecordInput {
   events?: readonly LedgerRecord[];
 }
 
-/** 渲染审批页所需的模型和 CSRF。nonce 不在这里。 */
+/** Approval view model and CSRF token; the nonce is excluded. */
 export interface BuiltApprovalPage {
   model: ApprovalPageModel;
   csrfToken: string;
@@ -39,26 +54,34 @@ export interface IndexRecordInput {
   status: ApprovalStatus;
 }
 
-/** Format index amounts in one place, preserving the store's order. */
-export function buildIndexPageModel(records: readonly IndexRecordInput[]): IndexPageModel {
-  return { approvals: records.map(({ request, status }) => ({
+/** Format list amounts and preserve caller order.
+ * Pass the full ledger for run mode; omitted events produce mode unknown. */
+export function buildIndexPageModel(
+  records: readonly IndexRecordInput[],
+  events: readonly LedgerRecord[] = [],
+): IndexPageModel {
+  const model: IndexPageModel = { approvals: records.map(({ request, status }) => ({
     id: request.approvalRequestId, vendor: request.vendor, status,
     amount: minorAmount(request.amountMinor, request.currency), currency: request.currency,
   })) };
+  const started = latestRun(events);
+  if (started !== undefined) model.runMode = started.mode;
+  return model;
 }
 
-/** 哈希去掉 0x 前缀后的前 12 个十六进制字符。 */
+/** First 12 hex characters of the hash, excluding an optional 0x prefix. */
 export function hashShort(hash: string): string {
   const body = /^0x/i.test(hash) ? hash.slice(2) : hash;
   return body.slice(0, 12);
 }
 
-/** 由账本记录和链校验结果生成审计页模型。链完整时忽略 verifyError。 */
+/** Build the audit model; ignore verifyError when the chain is valid. */
 export function buildAuditPageModel(
   events: readonly LedgerRecord[],
   verifyResult: ChainVerification,
 ): AuditPageModel {
   const index = indexLedger(events);
+  const started = latestRun(events);
   const model: AuditPageModel = {
     chainValid: verifyResult.ok,
     events: events.map((record) => toAuditRow(record, index)),
@@ -67,10 +90,14 @@ export function buildAuditPageModel(
   if (!verifyResult.ok && verifyResult.error !== undefined && verifyResult.error !== '') {
     model.verifyError = verifyResult.error;
   }
+  if (started !== undefined) {
+    model.runMode = started.mode;
+    if (started.policyNotes.length > 0) model.policyNotes = [...started.policyNotes];
+  }
   return model;
 }
 
-/** 由服务器上的审批记录生成审批页模型，金额在这里格式化。 */
+/** Build an approval model from a server record and format its amounts. */
 export function buildApprovalPageModel(input: ApprovalRecordInput): BuiltApprovalPage {
   const events = input.events ?? [];
   const request = input.request;
@@ -117,6 +144,8 @@ export function buildApprovalPageModel(input: ApprovalRecordInput): BuiltApprova
         && event.demoAutoApproved;
     }),
   };
+  const started = latestRun(events);
+  if (started !== undefined) model.runMode = started.mode;
   if (card !== undefined) model.card = card;
   return { model, csrfToken: input.csrf };
 }
@@ -132,7 +161,7 @@ interface LedgerIndex {
   cardCurrency: Map<string, string>;
 }
 
-/** 先扫一遍金额和币种，后面的授权、对账和卡片表都用这份索引。 */
+/** Index amounts and currencies for authorization, reconciliation, and card rows. */
 function indexLedger(events: readonly LedgerRecord[]): LedgerIndex {
   const requestMoney = new Map<string, RequestMoney>();
   const approvalToRequest = new Map<string, string>();
@@ -152,9 +181,13 @@ function indexLedger(events: readonly LedgerRecord[]): LedgerIndex {
   return { requestMoney, approvalToRequest, cardCurrency };
 }
 
-/** 每种账本事件的摘要。调用方不要再各自写一套。 */
-function summarize(event: CardAuditEvent, index: LedgerIndex): string {
+/** Centralized summaries for each ledger event kind. */
+function summarize(event: ViewAuditEvent, index: LedgerIndex): string {
   switch (event.kind) {
+    case 'run_started':
+      return runStartedSummary(event);
+    case 'controls_readback':
+      return controlsReadbackSummary(event);
     case 'offers_snapshot':
       return `Offers for "${event.intent}": ${event.offers.length}`;
     case 'comparison':
@@ -187,7 +220,7 @@ function summarize(event: CardAuditEvent, index: LedgerIndex): string {
       return `${amount} at ${merchant} (${event.mapped})`;
     }
     case 'card_frozen':
-      return `Frozen by ${event.by}: ${event.reason}`;
+      return `Frozen by ${freezeActorLabel(event.by)}: ${event.reason}`;
     case 'reconciliation': {
       const currency = index.cardCurrency.get(event.cardId);
       return `Settled ${minorText(event.settledMinor, currency)}, pending ${minorText(event.pendingMinor, currency)}, ${event.failedCount} failed`;
@@ -203,7 +236,7 @@ function summarize(event: CardAuditEvent, index: LedgerIndex): string {
   }
 }
 
-/** 知道币种就按币种格式化；不知道时保留最小单位，避免猜错小数位。 */
+/** Format known currencies; retain raw minor units when the currency is unknown. */
 function minorText(minor: number, currency: string | undefined): string {
   if (currency === undefined) return `${minor} minor`;
   try { return `${formatMinor(minor, currency)} ${currency}`; }
@@ -236,6 +269,7 @@ function toAuditRow(record: LedgerRecord, index: LedgerIndex): AuditEventRow {
     hashShort: hashShort(record.hash),
   };
   if (record.event.kind === 'authorization') row.source = record.event.source;
+  if (isControlsMismatch(record.event)) row.warning = true;
   return row;
 }
 
@@ -362,7 +396,7 @@ function cardFromLedger(
   return found;
 }
 
-/** 条款哈希必须和 @sk/policy 的 termsHash 一致。校验失败时不把请求内容写进错误。 */
+/** Match policy termsHash; validation errors must not expose request contents. */
 function presentedHash(request: ApprovalRequest): string {
   try {
     return termsHash(request);

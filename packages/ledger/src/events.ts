@@ -14,8 +14,12 @@ const offerPrice = z.object({
   unit: z.enum(['per_month', 'per_year', 'per_call', 'per_1k_units', 'one_time']),
 }).strict();
 
-/** The M3 card contract, independent of the frozen @sr/schema audit union. */
+/** The additive card audit contract, independent of the frozen @sr/schema audit union. */
 const CardAuditEventUnion = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('run_started'), mode: z.enum(['offline_emulator', 'sandbox', 'console_sandbox']),
+    policyNotes: z.array(z.string()) }).strict(),
+  z.object({ kind: z.literal('controls_readback'), cardId: text, matches: z.boolean(),
+    expected: z.record(z.unknown()), actual: z.record(z.unknown()) }).strict(),
   z.object({
     kind: z.literal('offers_snapshot'), intent: z.string(),
     offers: z.array(z.object({
@@ -33,6 +37,11 @@ const CardAuditEventUnion = z.discriminatedUnion('kind', [
       horizonLowMinor: minor, horizonHighMinor: minor, notes: z.array(z.string()),
       // Optional for older ledgers; preserves the native unit price alongside derived minor totals.
       price: offerPrice.optional(),
+      // Full card terms produced by the comparison, required for new approval submissions.
+      terms: z.object({ vendor: text, product: text, plan: z.enum(['monthly', 'annual', 'usage', 'one_time']),
+        currency, amountMinor: minor, interval: z.enum(['PER_TRANSACTION', 'MONTHLY', 'ALL_TIME']),
+        allowedTransactionCount: z.enum(['SINGLE', 'MULTIPLE']), merchantCategoryCode: mcc.optional(),
+        commitmentMonths: minor, priceStatus: z.enum(['verified', 'price_unverified']) }).strict().optional(),
     }).strict()),
     excluded: z.array(z.object({ offerId: text, reason: z.string() }).strict()),
   }).strict(),
@@ -71,7 +80,7 @@ const CardAuditEventUnion = z.discriminatedUnion('kind', [
     mapped: z.enum(['approved', 'limit_exceeded', 'merchant_category_not_allowed', 'currency_not_allowed', 'card_inactive', 'other']),
     transactionId: text.optional(),
   }).strict(),
-  z.object({ kind: z.literal('card_frozen'), cardId: text, by: z.enum(['agent', 'human']), reason: z.string() }).strict(),
+  z.object({ kind: z.literal('card_frozen'), cardId: text, by: z.enum(['agent', 'human', 'system']), reason: z.string() }).strict(),
   z.object({
     kind: z.literal('reconciliation'), cardId: text, window: z.object({ from: iso, to: iso }).strict(),
     settledMinor: z.number().int().safe(), pendingMinor: z.number().int().safe(),
@@ -79,7 +88,7 @@ const CardAuditEventUnion = z.discriminatedUnion('kind', [
   }).strict(),
   z.object({ kind: z.literal('webhook_received'), eventId: text, name: text, deduped: z.boolean(),
     processResult: z.enum(['success', 'error']).optional() }).strict(),
-  z.object({ kind: z.literal('raw_response'), ref: text, endpoint: text, status: z.number().int().min(100).max(599), body: requiredUnknown }).strict(),
+  z.object({ kind: z.literal('raw_response'), ref: text, endpoint: text, status: z.union([z.literal(0), z.number().int().min(100).max(599)]), body: requiredUnknown }).strict(),
 ]);
 
 // Card amounts retain the currency exponent; native offer prices use their own schema.

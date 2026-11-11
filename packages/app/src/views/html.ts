@@ -1,6 +1,9 @@
-// 三个页面共用的文档外壳。样式内联，不引用外部字体、脚本或图片。
+// Shared document shell with inline styles and no external assets.
 
-/** 把任意文本变成可放进 HTML 文本节点和属性值的字符串。先替换 &，避免二次转义。 */
+import type { ConsoleRunMode } from './models.js';
+import { runModeLabel } from './run-mode.js';
+
+/** Escape text and attribute values; replace ampersands first to avoid double escaping. */
 export function escapeHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -10,7 +13,7 @@ export function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-/** 按路径段编码。审批 id 里的斜杠不能变成新的一级路径。 */
+/** Encode each path segment so slashes in approval IDs cannot change routing. */
 export function segmentPath(segments: readonly string[]): string {
   return `/${segments.map((segment) => encodeURIComponent(segment)).join('/')}`;
 }
@@ -105,7 +108,7 @@ tr.x402 { background: #fff7ed; }
 fieldset { border: 0; margin: 0; padding: 0; min-inline-size: 0; }
 fieldset:disabled { opacity: 0.55; }
 .warning { color: #92400e; font-weight: 700; }
-tr.unconfirmed { background: #fffbeb; }
+tr.unconfirmed, tr.mismatch { background: #fffbeb; }
 label { display: block; font-weight: 600; margin-top: 0.8rem; }
 input[type="text"] {
   width: 100%;
@@ -129,15 +132,13 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 `;
 
-/**
- * 这些文档对应的 Content-Security-Policy。
- * 样式是内联的，所以 style-src 允许 'unsafe-inline'。
- * 页面没有脚本、外链和框架，default-src 'none' 会拦住 script。
- * 服务器应原样发送这个值，不要再放宽 script-src。
- */
+/** Content-Security-Policy for these documents.
+ * Inline styles require style-src 'unsafe-inline'.
+ * No scripts or external assets are used; default-src 'none' blocks scripts.
+ * Servers must send this policy unchanged. */
 export const CONSOLE_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 
-/** 拼出完整 HTML 文档。没有脚本，调用方不能再往文档末尾追加内容。 */
+/** Build the complete script-free document; callers must not append content. */
 export function renderDocument(title: string, body: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -156,8 +157,17 @@ ${body}
 `;
 }
 
-/** 三个页面共用的页头、主区域和页脚。 */
-export function consoleBody(main: string, current: 'approvals' | 'audit'): string {
+/** Shared run-mode heading; runModeLabel keeps offline pages free of sandbox labels. */
+export function runModeBlock(mode: ConsoleRunMode | undefined): string {
+  return `<p id="run-mode">${escapeHtml(runModeLabel(mode))}</p>`;
+}
+
+/** Shared header, main region, and footer; repeat the actual run-mode label. */
+export function consoleBody(
+  main: string,
+  current: 'approvals' | 'audit',
+  runMode: ConsoleRunMode | undefined,
+): string {
   return `<a class="skip" href="#content">Skip to content</a>
 <header class="top">
 <p class="brand"><a href="/">Spendkey for Cards</a></p>
@@ -170,6 +180,6 @@ export function consoleBody(main: string, current: 'approvals' | 'audit'): strin
 ${main}
 </main>
 <footer>
-<p>Sandbox console for approval and audit. Card numbers on these pages are masked.</p>
+<p>${escapeHtml(runModeLabel(runMode))}. Card numbers on these pages are masked.</p>
 </footer>`;
 }

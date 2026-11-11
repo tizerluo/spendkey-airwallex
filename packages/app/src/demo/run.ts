@@ -1,13 +1,15 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { AirwallexClient, loadAirwallexConfig } from '@sk/airwallex';
 import { runAgent, type AgentContext } from '@sk/agent';
 import { createCuratedSource } from '@sk/offers';
-import { InMemoryLedgerStore, verifyChain, signedDecimalToMinor, type LedgerStore } from '@sk/ledger';
+import { InMemoryLedgerStore, parseJsonl, runLedgerCli, verifyChain, signedDecimalToMinor, type JsonlVerification, type LedgerStore } from '@sk/ledger';
 import { termsHash } from '@sk/policy';
 import { ApprovalService } from '../server/service.js';
 import { MemoryApprovalStore, type ApprovalStore } from '../server/store.js';
 import { reconciledSpendInWindowMinor, TransactionLoop } from '../server/transactions.js';
+import { installDemoSignalHandlers } from './safety.js';
 import { createFakeAirwallex } from './fake-airwallex.js';
 
 export function demoContext(service: ApprovalService): AgentContext {
@@ -21,7 +23,7 @@ export function demoContext(service: ApprovalService): AgentContext {
 export async function runDemo(options: {
   client?: AirwallexClient; cardholderId?: string; now?: () => Date; outputDir?: string | false;
   ledger?: LedgerStore; store?: ApprovalStore;
-  log?: (line: string) => void;
+  log?: (line: string) => void; handleSignals?: boolean; signalClose?: () => void;
 } = {}) {
   const now = options.now ?? (() => new Date());
   const fake = createFakeAirwallex({ now });
@@ -35,34 +37,46 @@ export async function runDemo(options: {
   let operatorNonce = '';
   const service = new ApprovalService({ client, ledger, store, now, demoMode: true,
     cardholderId: options.cardholderId ?? 'cardholder_test_01',
-    printNonce(line) { operatorNonce = line.slice(line.lastIndexOf(': ') + 2); options.log?.(line); },
-    printOperatorToken(line) { options.log?.(line); },
+    printNonce(line) { operatorNonce = line.slice(line.lastIndexOf(': ') + 2); },
   });
   const loop = new TransactionLoop(service);
-  say(options.client ? 'Airwallex sandbox demo; synthetic offers; demo-operator auto-approval' : 'OFFLINE sandbox simulation; synthetic offers and fake Airwallex; demo-operator auto-approval');
   const ctx = demoContext(service);
-  if (options.client) {
-    const balances = await client.getBalances();
-    const usd = balances.find(balance => balance.currency === 'USD');
-    if (!usd || signedDecimalToMinor(usd.available_amount, 'USD') < 16_000) throw new Error('demo_requires_usd_sandbox_funds');
-    // Leave $400 of upfront room after the synthetic $100 obligation, whatever the sandbox balance.
-    ctx.reserveFloorMinor = { USD: Math.max(0, signedDecimalToMinor(usd.available_amount, 'USD') - 50_000) };
-    ctx.balanceProvider = async () => balances;
-  }
-  const result = await runAgent({ intent: 'design tool', usage: { horizonMonths: 12 },
-    ctx, sources: [createCuratedSource()], ledger, approvalService: service });
-  const annual = result.decision.ranked.find(entry => entry.candidate.plan === 'annual');
-  if (!annual?.results.some(rule => rule.code === 'reserve_breach' && !rule.pass)) throw new Error('demo_expected_annual_reserve_refusal');
-  say('DesignCo annual: refused — reserve_breach (cheaper over 12 months, too much upfront).');
-  if (!result.request || result.decision.chosen?.plan !== 'monthly') throw new Error('demo_expected_monthly_ask');
-  say('DesignCo monthly: ask for human approval.');
-  let frozen = false; let cardId: string | undefined;
+  const policyNotes = [options.client
+    ? 'reserve floor = max(0, available USD balance - 500.00 USD) must remain after upfront charges (demo policy)'
+    : 'reserve floor 500.00 USD must remain after upfront charges',
+    'known obligation 100.00 USD within 30 days'];
+  ledger.append({ kind: 'run_started', mode: options.client ? 'sandbox' : 'offline_emulator', policyNotes }, now().toISOString());
+  const uninstallSignals = options.handleSignals ? installDemoSignalHandlers(service, say, process, options.signalClose) : () => {};
+  let frozen = false; let cardId: string | undefined; let requestId: string | undefined;
   try {
+    say(options.client ? 'Airwallex sandbox demo; synthetic offers; demo-operator auto-approval' : 'Offline emulator (no Airwallex calls); emulated (offline); synthetic offers; demo-operator auto-approval');
+    if (options.client) {
+      const balances = await client.getBalances().catch((error: unknown) =>
+        service.providerFailure(error, '/api/v1/balances/current', 'balance check'));
+      const usd = balances.find(balance => balance.currency === 'USD');
+      if (!usd || signedDecimalToMinor(usd.available_amount, 'USD') < 16_000) throw new Error('demo_requires_usd_sandbox_funds');
+      // Leave $400 of upfront room after the synthetic $100 obligation, whatever the sandbox balance.
+      ctx.reserveFloorMinor = { USD: Math.max(0, signedDecimalToMinor(usd.available_amount, 'USD') - 50_000) };
+      ctx.balanceProvider = async () => balances;
+    }
+    const floor = ((ctx.reserveFloorMinor['USD'] ?? 0) / 100).toFixed(2);
+    for (const note of policyNotes) say(`Demo policy: ${note}`);
+    if (options.client) say(`Demo policy: reserve floor ${floor} USD must remain after upfront charges`);
+    const result = await runAgent({ intent: 'design tool', usage: { horizonMonths: 12 },
+      ctx, sources: [createCuratedSource()], ledger, approvalService: service });
+    const annual = result.decision.ranked.find(entry => entry.candidate.plan === 'annual');
+    if (!annual?.results.some(rule => rule.code === 'reserve_breach' && !rule.pass)) throw new Error('demo_expected_annual_reserve_refusal');
+    say('DesignCo annual: refused — reserve_breach (cheaper over 12 months, too much upfront).');
+    if (!result.request || result.decision.chosen?.plan !== 'monthly') throw new Error('demo_expected_monthly_ask');
+    say('DesignCo monthly: ask for human approval.');
+    requestId = result.request.approvalRequestId;
     const record = await service.grant(result.request.approvalRequestId, { nonce: operatorNonce,
       csrf: service.get(result.request.approvalRequestId).csrf, presentedTermsHash: termsHash(result.request) });
     cardId = record.card?.cardId;
     if (!cardId) throw new Error('demo_expected_card');
-    say('demo-operator approved (demoAutoApproved=true). Card ACTIVE: MONTHLY limit, USD, MCC 7372.');
+    const readback = await client.getCard(cardId).catch((error: unknown) =>
+      service.providerFailure(error, `/api/v1/issuing/cards/${cardId}`, 'controls transcript readback'));
+    say(`demo-operator approved (demoAutoApproved=true). Card ${readback.card_status}; controls read back: ${JSON.stringify(readback.authorization_controls)}`);
     const cases = [
       { amount: '10.00', currency: 'USD', mcc: '7372', expected: 'approved' },
       { amount: '61.00', currency: 'USD', mcc: '7372', expected: 'limit_exceeded' },
@@ -71,28 +85,45 @@ export async function runDemo(options: {
     for (const input of cases) {
       const outcome = await loop.simulate(cardId, input);
       if (outcome.mapped !== input.expected) throw new Error('demo_unexpected_authorization');
-      say(`sandbox simulation: ${input.amount} ${input.currency}, MCC ${input.mcc} -> ${outcome.mapped}`);
+      say(`${options.client ? 'sandbox simulation' : 'emulated (offline)'}: ${input.amount} ${input.currency}, MCC ${input.mcc} -> ${outcome.mapped}`);
     }
-    await loop.freeze(cardId, 'agent', 'demo complete; prevent further use'); frozen = true;
-    say('Agent froze the card: INACTIVE.');
+    await loop.freeze(cardId, 'human', 'demo-operator: demo complete; prevent further use'); frozen = true;
+    say('Demo operator froze the card: INACTIVE.');
     const inactive = await loop.simulate(cardId, { amount: '1.00', currency: 'USD', mcc: '7372' });
     if (inactive.mapped !== 'card_inactive') throw new Error('demo_expected_inactive');
-    say('sandbox simulation after freeze -> card_inactive');
+    say(`${options.client ? 'sandbox simulation' : 'emulated (offline)'} after freeze -> card_inactive`);
     const reconciled = await loop.reconcile(cardId);
     say(`Reconciled: settled ${reconciled.settledMinor} minor, pending ${reconciled.pendingMinor} minor, failed ${reconciled.failedCount}.`);
     const verification = verifyChain(ledger.read());
     if (!verification.ok) throw new Error('demo_chain_invalid');
     say('Ledger verify: OK.');
-    const tampered = ledger.read(); tampered[0]!.at = '2000-01-01T00:00:00.000Z';
-    const tamperVerification = verifyChain(tampered);
-    if (tamperVerification.ok) throw new Error('demo_tampering_undetected');
+    const head = ledger.read().at(-1)!;
+    say(`Ledger head: ${JSON.stringify({ seq: head.seq, hash: head.hash })}`);
+    say('Tamper-evident given a published head hash.');
+    const temp = mkdtempSync(resolve(tmpdir(), 'spendkey-audit-'));
+    let tamperVerification: JsonlVerification;
+    try {
+      const originalPath = resolve(temp, 'ledger.jsonl');
+      writeFileSync(originalPath, ledger.read().map(event => JSON.stringify(event) + '\n').join(''), { mode: 0o600 });
+      const original = runLedgerCli(['verify', originalPath, '--expect-head', head.hash, '--expect-seq', String(head.seq)]);
+      if (original.exitCode !== 0) throw new Error('demo_chain_invalid');
+      const tamperedPath = resolve(temp, 'ledger.tampered.jsonl');
+      copyFileSync(originalPath, tamperedPath);
+      const tampered = parseJsonl(readFileSync(tamperedPath, 'utf8'));
+      tampered[0]!.at = '2000-01-01T00:00:00.000Z';
+      writeFileSync(tamperedPath, tampered.map(event => JSON.stringify(event) + '\n').join(''), { mode: 0o600 });
+      const result = runLedgerCli(['verify', tamperedPath, '--expect-head', head.hash]);
+      tamperVerification = JSON.parse(result.output) as JsonlVerification;
+      if (result.exitCode !== 1 || tamperVerification.ok) throw new Error('demo_tampering_undetected');
+    } finally { rmSync(temp, { recursive: true, force: true }); }
     say('Tampered copy verify: FAIL (expected).');
     return { ledger, store, transcript, verification, tamperVerification, fake };
   } finally {
     try {
-      cardId ??= store.get(result.request.approvalRequestId)?.card?.cardId;
-      if (cardId && !frozen) await loop.freeze(cardId, 'agent', 'demo cleanup');
+      if (requestId) cardId ??= store.get(requestId)?.card?.cardId;
+      if (cardId && !frozen) await loop.freeze(cardId, 'human', 'demo-operator: demo cleanup');
     } finally {
+      uninstallSignals();
       // Preserve diagnostics, including cleanup, even when issuance or simulation fails.
       if (options.outputDir !== false) {
         const dir = resolve(options.outputDir ?? './demo-output'); mkdirSync(dir, { recursive: true, mode: 0o700 });

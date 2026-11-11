@@ -1,4 +1,4 @@
-// 控制台视图的公开入口。HTTP 服务稍后由其他任务加到 src/server，本包现在不包含它。
+// Public entry for the console views, server and demo of @sk/app.
 
 export { CONSOLE_CSP, escapeHtml } from './views/html.js';
 export { renderApprovalPage } from './views/approval-page.js';
@@ -20,6 +20,7 @@ export type {
   AuditEventRow,
   AuditPageModel,
   ChargeInterval,
+  ConsoleRunMode,
   IndexApprovalRow,
   IndexPageModel,
   PaymentRail,

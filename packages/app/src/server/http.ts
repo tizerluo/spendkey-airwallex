@@ -53,7 +53,7 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
       }
       if (method === 'GET' && path === '/') {
         const records = store.list().map(item => service.get(item.request.approvalRequestId));
-        respond(response, 200, renderIndexPage(buildIndexPageModel(records)), true); return;
+        respond(response, 200, renderIndexPage(buildIndexPageModel(records, ledger.read())), true); return;
       }
       const approvalRoute = /^\/approvals\/([a-zA-Z0-9_-]+)(?:\/(approve|reject))?$/.exec(path);
       if (method === 'GET' && approvalRoute && !approvalRoute[2]) {
@@ -126,11 +126,12 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
       // The token is independent of CSRF and is never echoed or persisted.
       const token = request.headers['x-operator-token'];
       const principal = service.authenticateOperator(typeof token === 'string' ? token : stringField(input, 'operatorToken'));
-      const recoveryRoute = /^\/approvals\/([a-zA-Z0-9_-]+)\/recover$/.exec(path);
+      const recoveryRoute = /^\/approvals\/([a-zA-Z0-9_-]+)\/(recover|abandon)$/.exec(path);
       if (recoveryRoute) {
         const id = recoveryRoute[1]!;
         service.checkCsrf(service.get(id), stringField(input, 'csrf'));
-        await service.recover(id);
+        if (recoveryRoute[2] === 'abandon') await service.abandon(id);
+        else await service.recover(id);
         respond(response, 200, '{"ok":true}'); return;
       }
       const cardRoute = /^\/cards\/([a-zA-Z0-9_-]+)\/(simulate|freeze)$/.exec(path);
@@ -155,7 +156,8 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
     })().catch((error: unknown) => {
       // Never expose request fields, response bodies, nonce, or provider exceptions.
       respond(response, error instanceof ServiceError ? error.status : 400,
-        JSON.stringify({ error: error instanceof ServiceError ? error.code : 'request_failed' }));
+        JSON.stringify({ error: error instanceof ServiceError ? error.code : 'request_failed',
+          ...(error instanceof ServiceError && error.provider ? { provider: error.provider } : {}) }));
     });
   });
 }

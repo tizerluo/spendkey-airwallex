@@ -4,7 +4,7 @@ import { openJsonlLedger } from '@sk/ledger';
 import { ApprovalService } from './service.js';
 import { JsonApprovalStore } from './store.js';
 import { createConsoleServer } from './http.js';
-import { seedDesignCoRequest } from './seed.js';
+import { recordConsoleRun, seedDesignCoRequest } from './seed.js';
 
 let cleanup = () => { /* startup has not opened resources */ };
 try {
@@ -16,6 +16,7 @@ try {
   cleanup = () => store.close();
   const ledger = openJsonlLedger('./console-data/ledger.jsonl');
   cleanup = () => { ledger.close(); store.close(); };
+  recordConsoleRun(ledger);
   const client = new AirwallexClient(config, { fetch: globalThis.fetch });
   const service = new ApprovalService({ store, ledger, client, cardholderId });
   const secret = process.env['AIRWALLEX_WEBHOOK_SECRET'];

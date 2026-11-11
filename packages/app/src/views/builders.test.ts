@@ -1,11 +1,12 @@
-// 页面模型构建测试。账本记录是普通对象，不打开文件，也不访问网络。
+// Offline model tests use plain ledger records without files or network access.
 
 import type { CardAuditEvent } from '@sk/ledger';
 import { termsHash, type ApprovalRequest } from '@sk/policy';
 import { describe, expect, it } from 'vitest';
-import { renderApprovalPage, renderAuditPage } from '../index.js';
+import { renderApprovalPage, renderAuditPage, renderIndexPage } from '../index.js';
 import { buildApprovalPageModel, buildAuditPageModel, buildIndexPageModel, hashShort } from './builders.js';
 import type { LedgerRecord } from './builders.js';
+import type { ViewAuditEvent } from './run-mode.js';
 
 const AT = '2030-01-01T00:00:00.000Z';
 const LATER = '2030-01-01T01:00:00.000Z';
@@ -71,7 +72,7 @@ function request(overrides: Partial<ApprovalRequest> = {}, withMcc = true): Appr
   return approval;
 }
 
-function envelope(seq: number, event: CardAuditEvent): LedgerRecord {
+function envelope(seq: number, event: ViewAuditEvent): LedgerRecord {
   const head = seq.toString(16).padStart(12, 'c');
   return {
     seq,
@@ -367,7 +368,9 @@ describe('buildAuditPageModel', () => {
 
     const html = renderAuditPage(page);
     expect(html).toContain('class="unconfirmed"');
-    expect(html).toContain('sandbox simulation');
+    expect(html).toContain('<p id="run-mode">mode unknown</p>');
+    expect(html).toContain('<td>mode unknown</td>');
+    expect(html.toLowerCase()).not.toContain('sandbox');
     expect(html).not.toContain('hash_mismatch');
     expect(html).not.toContain('role="alert"');
 
@@ -405,4 +408,182 @@ describe('buildAuditPageModel', () => {
     ]);
     expect(page.cards).toEqual([]);
   });
+
+  it('按最近一条 run_started 标注模式，离线页不出现 sandbox', () => {
+    const note = 'reserve floor 2,000.00 USD must remain after upfront charges';
+    const events = [
+      envelope(1, {
+        kind: 'run_started',
+        mode: 'offline_emulator',
+        policyNotes: [note, 'shown <as text>'],
+      }),
+      envelope(2, {
+        kind: 'authorization',
+        source: 'simulated',
+        cardId: 'card_test_01',
+        amount: '10.00',
+        currency: 'USD',
+        mapped: 'approved',
+      }),
+      envelope(3, {
+        kind: 'authorization',
+        source: 'observed',
+        cardId: 'card_test_01',
+        amount: '61.00',
+        currency: 'USD',
+        mapped: 'limit_exceeded',
+      }),
+      envelope(5, {
+        kind: 'controls_readback',
+        cardId: 'card_test_01',
+        matches: true,
+        expected: { limits: [{ amount: 60 }] },
+        actual: { marker: 'do-not-render-actual-marker' },
+      }),
+      envelope(6, {
+        kind: 'controls_readback',
+        cardId: 'card_test_01',
+        matches: false,
+        expected: { limits: [{ amount: 60 }] },
+        actual: { marker: 'do-not-render-mismatch-marker' },
+      }),
+      envelope(7, {
+        kind: 'card_frozen',
+        cardId: 'card_test_01',
+        by: 'system',
+        reason: 'scheduled stop',
+      }),
+      envelope(8, {
+        kind: 'card_frozen',
+        cardId: 'card_test_01',
+        by: 'human',
+        reason: 'demo-operator: stop',
+      }),
+    ];
+    const page = buildAuditPageModel(events, { ok: true });
+    expect(page.runMode).toBe('offline_emulator');
+    expect(page.policyNotes).toEqual([note, 'shown <as text>']);
+    expect(page.events.map((row) => [row.kind, row.summary, row.warning])).toEqual([
+      ['run_started', 'Run started: Offline emulator (no Airwallex calls)', undefined],
+      ['authorization', '10.00 USD at unknown merchant (approved)', undefined],
+      ['authorization', '61.00 USD at unknown merchant (limit_exceeded)', undefined],
+      ['controls_readback', 'controls read back: match', undefined],
+      ['controls_readback', 'controls read back: MISMATCH', true],
+      ['card_frozen', 'Frozen by system (auto): scheduled stop', undefined],
+      ['card_frozen', 'Frozen by human: demo-operator: stop', undefined],
+    ]);
+    const html = renderAuditPage(page);
+    expect(html).toContain('<p id="run-mode">Offline emulator (no Airwallex calls)</p>');
+    expect(html).toContain('shown &lt;as text&gt;');
+    expect(html).not.toContain('shown <as text>');
+    expect(html).not.toContain('do-not-render-actual-marker');
+    expect(html).not.toContain('do-not-render-mismatch-marker');
+    expect(html.match(/<td>emulated \(offline\)<\/td>/g)).toHaveLength(2);
+    expect(html).toContain('<strong class="warning">controls read back: MISMATCH</strong>');
+    expect(html).toContain('class="mismatch"');
+    expect(html).toContain('controls read back: match');
+    expect(rowAround(html, 'controls read back: match')).not.toContain('class="warning"');
+    expect(html.toLowerCase()).not.toContain('sandbox');
+
+    const index = buildIndexPageModel(
+      [{ request: request(), status: 'requested' }],
+      events,
+    );
+    expect(index.runMode).toBe('offline_emulator');
+    const indexHtml = renderIndexPage(index);
+    expect(indexHtml).toContain('<p id="run-mode">Offline emulator (no Airwallex calls)</p>');
+    expect(indexHtml.toLowerCase()).not.toContain('sandbox');
+
+    const approval = buildApprovalPageModel({
+      approvalId: 'approval_test_01',
+      request: request(),
+      status: 'issued',
+      nonceHint: 'nonce printed in operator terminal',
+      csrf: CSRF,
+      events,
+    });
+    expect(approval.model.runMode).toBe('offline_emulator');
+    const approvalHtml = renderApprovalPage(approval.model, { csrfToken: approval.csrfToken });
+    expect(approvalHtml).toContain('<p id="run-mode">Offline emulator (no Airwallex calls)</p>');
+    expect(approvalHtml.toLowerCase()).not.toContain('sandbox');
+
+    const laterSeqFirst = buildAuditPageModel([
+      envelope(8, { kind: 'run_started', mode: 'offline_emulator', policyNotes: ['kept'] }),
+      envelope(2, { kind: 'run_started', mode: 'sandbox', policyNotes: ['stale note'] }),
+    ], { ok: true });
+    expect(laterSeqFirst.runMode).toBe('offline_emulator');
+    expect(laterSeqFirst.policyNotes).toEqual(['kept']);
+    const tied = buildAuditPageModel([
+      envelope(3, { kind: 'run_started', mode: 'sandbox', policyNotes: ['first'] }),
+      envelope(3, { kind: 'run_started', mode: 'offline_emulator', policyNotes: ['second'] }),
+    ], { ok: true });
+    expect(tied.runMode).toBe('offline_emulator');
+    expect(tied.policyNotes).toEqual(['second']);
+  });
+
+  it('sandbox 与 console_sandbox 使用沙箱标签，坏掉的最新 mode 变成 mode unknown', () => {
+    const simulated = envelope(1, {
+      kind: 'authorization',
+      source: 'simulated',
+      cardId: 'card_test_01',
+      amount: '10.00',
+      currency: 'USD',
+      mapped: 'approved',
+    });
+    const observed = envelope(2, {
+      kind: 'authorization',
+      source: 'observed',
+      cardId: 'card_test_01',
+      amount: '1.00',
+      currency: 'USD',
+      merchantName: 'Synthetic DesignCo',
+      mapped: 'merchant_category_not_allowed',
+    });
+    const sandbox = buildAuditPageModel([
+      envelope(0, { kind: 'run_started', mode: 'sandbox', policyNotes: [] }),
+      simulated,
+      observed,
+    ], { ok: true });
+    expect(sandbox.runMode).toBe('sandbox');
+    expect(sandbox.policyNotes).toBeUndefined();
+    const sandboxHtml = renderAuditPage(sandbox);
+    expect(sandboxHtml).toContain('<p id="run-mode">Airwallex sandbox</p>');
+    expect(sandboxHtml).toContain('<td>sandbox simulation</td>');
+    expect(sandboxHtml).toContain('<td>sandbox event (observed)</td>');
+
+    const consoleSandbox = buildAuditPageModel([
+      envelope(0, { kind: 'run_started', mode: 'console_sandbox', policyNotes: ['operator console'] }),
+      simulated,
+    ], { ok: true });
+    expect(consoleSandbox.runMode).toBe('console_sandbox');
+    expect(renderAuditPage(consoleSandbox)).toContain('<td>sandbox simulation</td>');
+    expect(renderAuditPage(consoleSandbox)).toContain('operator console');
+
+    const brokenMode = buildAuditPageModel([
+      envelope(0, { kind: 'run_started', mode: 'offline_emulator', policyNotes: ['older'] }),
+      envelope(3, { kind: 'run_started', mode: 'not-a-mode', policyNotes: [] } as unknown as ViewAuditEvent),
+      simulated,
+    ], { ok: true });
+    expect(brokenMode.runMode).toBeUndefined();
+    const brokenHtml = renderAuditPage(brokenMode);
+    expect(brokenHtml).toContain('<p id="run-mode">mode unknown</p>');
+    expect(brokenHtml).toContain('<td>mode unknown</td>');
+    expect(brokenHtml).toContain('Run started: mode unknown');
+    expect(brokenHtml.toLowerCase()).not.toContain('sandbox');
+
+    const partial = buildAuditPageModel([
+      envelope(0, { kind: 'controls_readback', cardId: 'card_test_01' } as unknown as ViewAuditEvent),
+    ], { ok: true });
+    expect(partial.events[0]?.summary).toBe('controls read back: MISMATCH');
+    expect(partial.events[0]?.warning).toBe(true);
+    expect(partial.runMode).toBeUndefined();
+  });
 });
+
+/** Find the row containing text to check that only mismatches receive warning styling. */
+function rowAround(html: string, needle: string): string {
+  const at = html.indexOf(needle);
+  const start = html.lastIndexOf('<tr', at);
+  const end = html.indexOf('</tr>', at);
+  return html.slice(start, end);
+}

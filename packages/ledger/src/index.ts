@@ -6,3 +6,5 @@ export { InMemoryLedgerStore, openInMemoryLedger, openJsonlLedger } from './stor
 export type { LedgerStore } from './store.js';
 export { assertRedacted, redactValue } from './redaction.js';
 export { currencyExponent, signedDecimalToMinor } from './money.js';
+
+export { runLedgerCli } from './cli.js';

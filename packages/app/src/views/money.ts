@@ -1,9 +1,9 @@
-// 金额展示。只做十进制字符串拼接，不用浮点乘除，也不做四舍五入。
+// Format amounts using decimal strings without floating-point arithmetic or rounding.
 
 import { currencyExponent } from '@sk/ledger';
 export { currencyExponent } from '@sk/ledger';
 
-/** 把最小货币单位格式化成十进制字符串。负数带显式减号，零不带符号。 */
+/** Format minor units as a decimal string; negative amounts have an explicit minus sign. */
 export function formatMinor(minor: number, currency: string): string {
   if (typeof minor !== 'number' || !Number.isSafeInteger(minor)) {
     throw new RangeError('invalid_minor_amount');
@@ -13,10 +13,8 @@ export function formatMinor(minor: number, currency: string): string {
   return finishDecimal(negative, digitsToParts(digits, currencyExponent(currency)));
 }
 
-/**
- * 格式化账本里的有符号十进制字符串，例如 "-12.50" 或 "+3"。
- * 小数位多于币种刻度且不全是 0 时直接抛错，避免静默舍入。
- */
+/** Format signed ledger decimals such as -12.50 or +3.
+ * Reject extra nonzero fractional digits instead of silently rounding. */
 export function formatSignedDecimal(amount: string, currency: string): string {
   const match = /^([+-])?(\d+)(?:\.(\d+))?$/.exec(amount);
   if (match === null) throw new RangeError('invalid_signed_decimal');
@@ -31,7 +29,7 @@ export function formatSignedDecimal(amount: string, currency: string): string {
   return finishDecimal(sign === '-', aligned);
 }
 
-/** 区间两端相同只显示一个数，不同则用连字符拼成 low-high。 */
+/** Show one amount for equal bounds, otherwise a low-high range. */
 export function formatMinorRange(lowMinor: number, highMinor: number, currency: string): string {
   const low = formatMinor(lowMinor, currency);
   const high = formatMinor(highMinor, currency);
@@ -43,14 +41,14 @@ interface DecimalParts {
   fraction: string;
 }
 
-/** 最小单位的数字串按小数位切开。位数不够时在左边补 0。 */
+/** Split minor-unit digits at the currency scale, padding with leading zeros as needed. */
 function digitsToParts(digits: string, exponent: number): DecimalParts {
   if (exponent === 0) return { whole: digits, fraction: '' };
   const padded = digits.padStart(exponent + 1, '0');
   return { whole: padded.slice(0, -exponent), fraction: padded.slice(-exponent) };
 }
 
-/** 把已经是十进制的整数和小数对齐到币种刻度。多出来的非零小数视为无法无损展示。 */
+/** Align decimal digits to the currency scale; reject lossy conversion. */
 function alignFraction(whole: string, fraction: string, exponent: number): DecimalParts {
   if (fraction.length > exponent) {
     const extra = fraction.slice(exponent);
@@ -60,7 +58,7 @@ function alignFraction(whole: string, fraction: string, exponent: number): Decim
   return { whole, fraction: fraction.padEnd(exponent, '0') };
 }
 
-/** 零值去掉负号。小数位为 0 的币种不输出小数点。 */
+/** Remove negative signs from zero and omit the decimal point for zero-scale currencies. */
 function finishDecimal(negative: boolean, parts: DecimalParts): string {
   const whole = parts.whole.replace(/^0+(?=\d)/, '');
   const text = parts.fraction === '' ? whole : `${whole}.${parts.fraction}`;

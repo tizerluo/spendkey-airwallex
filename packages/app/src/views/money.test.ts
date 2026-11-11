@@ -1,4 +1,4 @@
-// 金额格式化测试。不访问网络，也不经过浮点。
+// Offline amount-formatting tests without floating-point arithmetic.
 
 import { describe, expect, it } from 'vitest';
 import { formatMinor, formatMinorRange, formatSignedDecimal } from './money.js';

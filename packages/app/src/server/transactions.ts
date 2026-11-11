@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { mapFailureReason, type IssuingTransaction } from '@sk/airwallex';
+import { AirwallexResponseError, mapFailureReason, type IssuingTransaction } from '@sk/airwallex';
 import { redactValue, signedDecimalToMinor, type LedgerStore } from '@sk/ledger';
 import type { ApprovalService } from './service.js';
 import { ServiceError } from './service.js';
@@ -59,14 +59,18 @@ export class TransactionLoop {
     if (!record) throw new ServiceError('card_not_found', 404);
     if (issuedOnly && record.status !== 'issued') throw new ServiceError('card_not_issued', 409);
   }
+  async #call<T>(endpoint: string, step: string, operation: () => Promise<T>): Promise<T> {
+    try { return await operation(); }
+    catch (error) { this.service.providerFailure(error, endpoint, step); }
+  }
   async simulate(cardId: string, input: { amount: string; currency: string; mcc: string }) {
     this.#ownedCard(cardId, true);
     if (!/^[A-Z]{3}$/.test(input.currency) || !/^\d{4}$/.test(input.mcc)) throw new ServiceError('invalid_simulation');
     try { if (signedDecimalToMinor(input.amount, input.currency) <= 0) throw new Error(); }
     catch { throw new ServiceError('invalid_simulation'); }
-    const result = await this.service.options.client.simulateAuthorization({ card_id: cardId,
+    const result = await this.#call('/api/v1/simulation/issuing/create', 'simulate', () => this.service.options.client.simulateAuthorization({ card_id: cardId,
       transaction_amount: input.amount, transaction_currency: input.currency, merchant_category_code: input.mcc,
-    });
+    }));
     const event = { kind: 'authorization' as const, source: 'simulated' as const, cardId, amount: input.amount,
       currency: input.currency, merchantCategoryCode: input.mcc,
       ...(result.process_result === undefined ? {} : { processResult: result.process_result }),
@@ -77,9 +81,21 @@ export class TransactionLoop {
     this.service.options.ledger.append(event, this.service.now().toISOString());
     return { mapped: event.mapped };
   }
-  async freeze(cardId: string, by: 'agent' | 'human', reason: string): Promise<void> {
+  async freeze(cardId: string, by: 'agent' | 'human' | 'system', reason: string): Promise<void> {
     this.#ownedCard(cardId);
-    await this.service.options.client.freezeCard(cardId);
+    const endpoint = `/api/v1/issuing/cards/${cardId}/update`;
+    let result;
+    try { result = await this.#call(endpoint, 'freeze', () => this.service.options.client.freezeCard(cardId)); }
+    catch (error) { if (!(error instanceof AirwallexResponseError)) throw error; }
+    if (result?.card_status !== 'INACTIVE') {
+      let readback;
+      try { readback = await this.#call(`/api/v1/issuing/cards/${cardId}`, 'freeze readback', () => this.service.options.client.getCard(cardId)); }
+      catch (error) {
+        if (error instanceof AirwallexResponseError) throw new ServiceError('freeze_not_confirmed', 409);
+        throw error;
+      }
+      if (readback.card_status !== 'INACTIVE') throw new ServiceError('freeze_not_confirmed', 409);
+    }
     for (const record of this.service.options.store.list()) {
       if (record.card?.cardId === cardId) { record.card.status = 'INACTIVE'; this.service.options.store.save(record); }
     }
@@ -93,7 +109,7 @@ export class TransactionLoop {
     const transactions = new Map<string, IssuingTransaction>();
     let finished = false;
     for (let page = 0; page < 100; page++) {
-      const result = await client.listTransactions({ card_id: cardId, from: window.from, to: window.to, page });
+      const result = await this.#call('/api/v1/issuing/transactions', 'reconcile', () => client.listTransactions({ card_id: cardId, from: window.from, to: window.to, page }));
       if (result.unparsed.length > 0) {
         ledger.append({ kind: 'raw_response', ref: randomUUID(), endpoint: 'reconcile/unparsed', status: 200,
           body: redactValue(result.unparsed) }, this.service.now().toISOString());

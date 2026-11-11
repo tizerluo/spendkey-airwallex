@@ -11,8 +11,9 @@ import { CONSOLE_CSP } from '../views/html.js';
 import { createFakeAirwallex } from '../demo/fake-airwallex.js';
 import { demoContext } from '../demo/run.js';
 import { createConsoleServer } from './http.js';
+import { recordDecision } from './decision-fixture.test-support.js';
 import { ApprovalService, digest } from './service.js';
-import { seedDesignCoRequest } from './seed.js';
+import { recordConsoleRun, seedDesignCoRequest } from './seed.js';
 import { JsonApprovalStore, MemoryApprovalStore, type ApprovalStore } from './store.js';
 import { monthWindow, spentInWindowMinor, TransactionLoop } from './transactions.js';
 
@@ -34,6 +35,7 @@ async function fixture(options: { unconfirmedCreate?: boolean; store?: ApprovalS
     printOperatorToken: line => operatorLines.push(line) });
   const operatorToken = operatorLines[0]!.split(': ')[1]!;
   const request = approvalRequest(); if (options.noMcc) delete request.merchantCategoryCode;
+  recordDecision(ledger, request);
   const submitted = await service.submit(request);
   const nonce = printed[0]!.split(': ')[1]!;
   const fields = { nonce, csrf: service.get(submitted.id).csrf, presentedTermsHash: termsHash(request),
@@ -113,7 +115,7 @@ describe('durable approval state machine', () => {
     expect(result.status).toBe('issued'); expect(result.approval?.approvalId).toBe(stored.approval!.approvalId);
     expect(result.input?.request_id).toBe(stored.input!.request_id); expect(f.fake.createCalls).toBe(1);
     expect(f.ledger.read().map(({ event }) => event.kind)).toEqual([
-      'approval_requested', 'approval_granted', 'card_issue_unconfirmed', 'raw_response', 'card_issued',
+      'offers_snapshot', 'comparison', 'decision', 'approval_requested', 'approval_granted', 'card_issue_unconfirmed', 'raw_response', 'controls_readback', 'card_issued',
     ]);
     expect(verifyChain(f.ledger.read()).ok).toBe(true);
     const raw = f.ledger.read().find(({ event }) => event.kind === 'raw_response')!.event;
@@ -147,27 +149,34 @@ describe('durable approval state machine', () => {
       const approvalId = f.store.get(f.request.approvalRequestId)!.approval!.approvalId; store.close();
       const reopened = new JsonApprovalStore(path);
       expect(reopened.get(f.request.approvalRequestId)?.approval?.approvalId).toBe(approvalId);
+      expect(reopened.get(f.request.approvalRequestId)?.decisionSeq).toBe(2);
       reopened.close();
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
 
 describe('HTTP approval boundary and console', () => {
-  it('caps lifetimes at one hour, allows canonical retries, and bounds open requests at 20', async () => {
+  it('caps lifetimes at fifteen minutes, allows canonical retries, and bounds independent open requests at 20', async () => {
     const f = await fixture(); const send = await start(f.service);
     const reordered = Object.fromEntries(Object.entries(f.request).reverse());
     expect((await send('/approvals', reordered)).status).toBe(201);
     // Fields outside the binding terms hash must still participate in conflicts.
     expect((await send('/approvals', { ...f.request, product: 'Other test product' })).status).toBe(409);
-    expect((await send('/approvals', { ...f.request, approvalRequestId: 'too_long_test', expiresAt: '2026-11-11T11:00:00.001Z' })).status).toBe(400);
+    expect((await send('/approvals', { ...f.request, approvalRequestId: 'too_long_test', expiresAt: '2026-11-11T10:15:00.001Z' })).status).toBe(409);
     for (let i = 1; i < 20; i++) {
-      expect((await send('/approvals', { ...f.request, approvalRequestId: `request_cap_test_${i}`, expiresAt: '2026-11-11T11:00:00.000Z' })).status).toBe(201);
+      const request = { ...f.request, approvalRequestId: `request_cap_test_${i}`, offerId: `offer_cap_test_${i}` };
+      recordDecision(f.ledger, request);
+      expect((await send('/approvals', request)).status).toBe(201);
     }
     expect((await send('/approvals', f.request)).status).toBe(201);
-    expect((await send('/approvals', { ...f.request, approvalRequestId: 'request_over_cap_test' })).status).toBe(429);
+    const overCap = { ...f.request, approvalRequestId: 'request_over_cap_test', offerId: 'offer_over_cap_test' };
+    recordDecision(f.ledger, overCap);
+    expect((await send('/approvals', overCap)).status).toBe(429);
     expect(f.store.list()).toHaveLength(20);
     f.setTime('2026-11-11T10:16:00.000Z');
-    expect((await send('/approvals', { ...f.request, approvalRequestId: 'request_after_expiry_test', expiresAt: '2026-11-11T10:30:00.000Z' })).status).toBe(201);
+    const fresh = { ...f.request, approvalRequestId: 'request_after_expiry_test', createdAt: '2026-11-11T10:16:00.000Z', expiresAt: '2026-11-11T10:30:00.000Z' };
+    recordDecision(f.ledger, fresh);
+    expect((await send('/approvals', fresh)).status).toBe(201);
   });
   it('rotates startup operator tokens and pending nonces, expires stale requests, and avoids duplicate DesignCo seeds', async () => {
     const f = await fixture();
@@ -530,5 +539,19 @@ describe('signed webhooks and transaction loop', () => {
     expect(f.ledger.read().find(({ event }) => event.kind === 'authorization'
       && event.transactionId === 'transaction_test_credit')?.event).toMatchObject({ amount: typeof amount === 'number' ? '-3' : '-3.00' });
     expect(verifyChain(f.ledger.read()).ok).toBe(true);
+  });
+});
+
+describe('HTTP index run mode', () => {
+  it.each(['console_sandbox', 'offline_emulator'] as const)('renders the recorded %s mode on GET /', async mode => {
+    const f = await fixture();
+    if (mode === 'console_sandbox') recordConsoleRun(f.ledger, new Date(instant));
+    else f.ledger.append({ kind: 'run_started', mode, policyNotes: [] }, instant);
+    const send = await start(f.service);
+    const response = await send('/');
+    expect(response.status).toBe(200);
+    expect(response.text).toContain(mode === 'console_sandbox' ? 'Airwallex sandbox' : 'Offline emulator (no Airwallex calls)');
+    expect(response.text).not.toContain('mode unknown');
+    if (mode === 'offline_emulator') expect(response.text.toLowerCase()).not.toContain('sandbox');
   });
 });
