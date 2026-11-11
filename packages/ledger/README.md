@@ -133,8 +133,12 @@ GNF, ISK, JPY, KMF, KRW, PYG, RWF, UGX, UYI, VND, VUV, XAF, XOF, XPF. Three
 decimals: KWD, BHD, OMR, JOD, TND, IQD, LYD. Other uppercase three-letter codes
 use two decimals. Leading zeroes are accepted; exponents, whitespace, plus signs,
 excess precision and unsafe integers are rejected. Negative zero is normalized.
-Authorization amounts and nested offer prices are validated against their
-currency using the same conversion. Prefer decimal strings from responses.
+Authorization amounts are validated against their currency using this conversion.
+`currencyExponent` exports the same exponent lookup for consumers such as the app.
+Prefer decimal strings from responses. Offer snapshot prices and optional comparison
+candidate `price` fields preserve native unit prices as nonnegative decimal strings
+with up to six fractional digits, including x402 micro prices. Comparison totals
+(`*Minor`) remain safe integer minor units; they do not replace the native price.
 
 Build and verify a file from the repository root:
 

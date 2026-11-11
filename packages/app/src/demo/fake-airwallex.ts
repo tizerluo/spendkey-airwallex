@@ -58,13 +58,13 @@ export function createFakeAirwallex(options: { now?: () => Date; unconfirmedCrea
         for (const limit of controls.transaction_limits.limits) {
           const used = approved.filter(transaction => limit.interval !== 'MONTHLY'
             || transaction.transaction_date?.slice(0, 7) === now().toISOString().slice(0, 7))
-            .reduce((sum, transaction) => sum + signedDecimalToMinor(String(transaction.transaction_amount), currency), 0);
+            .reduce((sum, transaction) => sum + signedDecimalToMinor(transaction.signedAmount, currency), 0);
           const total = signedDecimalToMinor(amount, currency) + (limit.interval === 'PER_TRANSACTION' ? 0 : used);
           if (total > signedDecimalToMinor(String(limit.amount), currency)) failure = 'LIMIT_EXCEEDED';
         }
       }
       const transactionId = `transaction_test_${transactions.length + 1}`;
-      transactions.push({ transaction_id: transactionId, card_id: cardId, transaction_amount: amount,
+      transactions.push({ transaction_id: transactionId, card_id: cardId, transaction_amount: amount, signedAmount: amount,
         transaction_currency: currency, transaction_date: now().toISOString(), status: failure ? 'FAILED' : 'SUCCEEDED',
         ...(failure === undefined ? {} : { failure_reason: failure }),
         merchant: { name: 'Synthetic DesignCo', category_code: mcc, extra: {} }, extra: {},

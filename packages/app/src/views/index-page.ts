@@ -11,7 +11,7 @@ export function renderIndexPage(model: IndexPageModel): string {
   const main = `<h1>Approvals</h1>
 <p>A person approves the exact terms before a card is issued.</p>
 ${body}`;
-  return renderDocument('Approvals', consoleBody(main));
+  return renderDocument('Approvals', consoleBody(main, 'approvals'));
 }
 
 /** 列表保持调用方给出的顺序。 */

@@ -101,7 +101,7 @@ export class TransactionLoop {
     for (const transaction of transactions.values()) {
       const { status } = transaction;
       if (status !== 'PENDING' && status !== 'SUCCEEDED' && status !== 'FAILED') throw new ServiceError('transaction_status_unknown');
-      const amount = String(transaction.transaction_amount);
+      const amount = String(transaction.signedAmount);
       const minor = signedDecimalToMinor(amount, transaction.transaction_currency);
       if (status === 'FAILED') failedCount++;
       else {
@@ -135,7 +135,7 @@ export class TransactionLoop {
     if (ledger.read().some(({ event }) => event.kind === 'authorization' && event.source === 'observed'
       && event.cardId === cardId && event.transactionId === transaction.transaction_id && event.processResult === transaction.status)) return;
     const merchant = transaction.merchant ?? transaction.merchant_info;
-    ledger.append({ kind: 'authorization', source: 'observed', cardId, amount: String(transaction.transaction_amount),
+    ledger.append({ kind: 'authorization', source: 'observed', cardId, amount: String(transaction.signedAmount),
       currency: transaction.transaction_currency, transactionId: transaction.transaction_id,
       ...(transaction.status === undefined ? {} : { processResult: transaction.status }),
       ...(transaction.failure_reason == null ? {} : { failureReason: transaction.failure_reason }),

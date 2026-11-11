@@ -258,10 +258,10 @@ describe('signed webhooks and transaction loop', () => {
     const f = await fixture(); await f.grant();
     const row = { card_id: 'card_test_1', transaction_currency: 'USD', transaction_date: instant, extra: {} };
     f.fake.transactions.push(
-      { ...row, transaction_id: 'transaction_test_a', transaction_amount: '20.00', status: 'SUCCEEDED' },
-      { ...row, transaction_id: 'transaction_test_b', transaction_amount: '-3.00', status: 'SUCCEEDED' },
-      { ...row, transaction_id: 'transaction_test_c', transaction_amount: '4.00', status: 'PENDING' },
-      { ...row, transaction_id: 'transaction_test_d', transaction_amount: '99.00', status: 'FAILED' },
+      { ...row, transaction_id: 'transaction_test_a', transaction_amount: '20.00', signedAmount: '20.00', status: 'SUCCEEDED' },
+      { ...row, transaction_id: 'transaction_test_b', transaction_amount: '-3.00', signedAmount: '-3.00', status: 'SUCCEEDED' },
+      { ...row, transaction_id: 'transaction_test_c', transaction_amount: '4.00', signedAmount: '4.00', status: 'PENDING' },
+      { ...row, transaction_id: 'transaction_test_d', transaction_amount: '99.00', signedAmount: '99.00', status: 'FAILED' },
     );
     const listing = vi.spyOn(f.client, 'listTransactions');
     listing.mockResolvedValueOnce({ items: f.fake.transactions, unparsed: [], has_more: true });
@@ -280,10 +280,34 @@ describe('signed webhooks and transaction loop', () => {
     const listing = vi.spyOn(f.client, 'listTransactions');
     listing.mockResolvedValueOnce({ items: [], unparsed: [{ unfamiliar: true }], has_more: false });
     await expect(f.loop.reconcile('card_test_1')).rejects.toThrow('reconciliation_unparsed_transactions');
-    listing.mockResolvedValueOnce({ items: [{ transaction_id: 'transaction_test_unknown', transaction_amount: '1.00', transaction_currency: 'USD', status: 'UNKNOWN', extra: {} }], unparsed: [] });
+    listing.mockResolvedValueOnce({ items: [{ transaction_id: 'transaction_test_unknown', transaction_amount: '1.00', signedAmount: '1.00', transaction_currency: 'USD', status: 'UNKNOWN', extra: {} }], unparsed: [] });
     await expect(f.loop.reconcile('card_test_1')).rejects.toThrow('transaction_status_unknown');
     listing.mockResolvedValue({ items: [], unparsed: [], has_more: true });
     await expect(f.loop.reconcile('card_test_1')).rejects.toThrow('transaction_pagination_limit');
     expect(f.ledger.read().some(({ event }) => event.kind === 'reconciliation')).toBe(false);
+  });
+  it.each([
+    ['REFUND', '3.00'], ['REVERSAL', 3], ['REFUND', '-3.00'], ['REVERSAL', -3],
+  ])('uses signedAmount from parsed %s amounts (%s) in totals and audit events', async (transactionType, amount) => {
+    const f = await fixture(); await f.grant();
+    const row = { card_id: 'card_test_1', transaction_currency: 'USD', transaction_date: instant, status: 'SUCCEEDED', extra: {} };
+    f.fake.transactions.push(
+      { ...row, transaction_id: 'transaction_test_purchase', transaction_amount: '20.00', signedAmount: '20.00' },
+      { ...row, transaction_id: 'transaction_test_credit', transaction_type: transactionType,
+        transaction_amount: amount, signedAmount: '-3.00' },
+      { ...row, transaction_id: 'transaction_test_pending_credit', transaction_type: transactionType,
+        transaction_amount: '1.00', signedAmount: '-1.00', status: 'PENDING' },
+    );
+    // The injected fake transport returns provider fields; the real client computes signedAmount.
+    const parsed = await f.client.listTransactions({ card_id: 'card_test_1' });
+    expect(parsed.items[1]).toMatchObject({ transaction_amount: amount, signedAmount: typeof amount === 'number' ? -3 : '-3.00' });
+    expect(await f.loop.reconcile('card_test_1')).toMatchObject({ settledMinor: 1700, pendingMinor: -100 });
+    expect(spentInWindowMinor(f.ledger, 'USD', monthWindow(new Date(instant)))).toBe(1600);
+    await f.loop.reconcile('card_test_1');
+    expect(spentInWindowMinor(f.ledger, 'USD', monthWindow(new Date(instant)))).toBe(1600);
+    expect(f.ledger.read().filter(({ event }) => event.kind === 'authorization')).toHaveLength(3);
+    expect(f.ledger.read().find(({ event }) => event.kind === 'authorization'
+      && event.transactionId === 'transaction_test_credit')?.event).toMatchObject({ amount: typeof amount === 'number' ? '-3' : '-3.00' });
+    expect(verifyChain(f.ledger.read()).ok).toBe(true);
   });
 });

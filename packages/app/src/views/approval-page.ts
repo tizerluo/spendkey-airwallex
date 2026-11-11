@@ -16,7 +16,7 @@ const PRICE_UNVERIFIED_CHIP = 'Price not verified \u2014 no savings claim';
 export function renderApprovalPage(model: ApprovalPageModel, options: ApprovalRenderOptions): string {
   const title = `Spendkey \u00b7 ${model.intent}`;
   const main = `${banner(model)}${heading(model)}${chosenSection(model)}${reasonSection(model)}${comparisonSection(model)}${excludedSection(model)}${cardSection(model)}${decisionSection(model, options)}`;
-  return renderDocument(title, consoleBody(main));
+  return renderDocument(title, consoleBody(main, 'approvals'));
 }
 
 /** 演示模式下说明自动批准会写进审计日志。 */
@@ -301,12 +301,10 @@ function decisionSummary(model: ApprovalPageModel): string {
   return `Rail ${chosen.rail}, amount ${chosen.amount} ${chosen.currency}, ${intervalText(chosen.interval)}, ${chargeText(chosen.allowedTransactionCount)}, ${category}, commitment ${commitmentText(chosen.commitmentMonths)}.`;
 }
 
-/** needsMcc 为真才输出商户类别输入框。条款里已有代码时预填，提交值与页面展示一致。 */
+/** needsMcc 为真才输出商户类别输入框。代码由审批人填写。 */
 function mccField(model: ApprovalPageModel): string {
   if (!model.needsMcc) return '';
-  const code = model.chosen.merchantCategoryCode;
-  const value = code === undefined ? '' : ` value="${escapeHtml(code)}"`;
   return `<label for="merchant-category-code">Merchant category code</label>
 <p id="mcc-hint" class="hint">Four digits. Submitting this code binds it to the approval.</p>
-<input id="merchant-category-code" name="merchantCategoryCode" type="text" required inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="off" aria-describedby="mcc-hint"${value}>`;
+<input id="merchant-category-code" name="merchantCategoryCode" type="text" required inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="off" aria-describedby="mcc-hint">`;
 }

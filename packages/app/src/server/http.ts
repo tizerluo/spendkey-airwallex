@@ -1,12 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { parseWebhookEvent, transactionSchema, verifyWebhookSignature } from '@sk/airwallex';
 import { verifyChain } from '@sk/ledger';
-import { buildApprovalPageModel, buildAuditPageModel } from '../views/builders.js';
+import { buildApprovalPageModel, buildAuditPageModel, buildIndexPageModel } from '../views/builders.js';
 import { CONSOLE_CSP } from '../views/html.js';
 import { renderApprovalPage } from '../views/approval-page.js';
 import { renderAuditPage } from '../views/audit-page.js';
 import { renderIndexPage } from '../views/index-page.js';
-import { formatMinor } from '../views/money.js';
 import { ApprovalService, ServiceError } from './service.js';
 import { TransactionLoop } from './transactions.js';
 
@@ -50,11 +49,8 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
         throw new ServiceError('invalid_origin', 403);
       }
       if (method === 'GET' && path === '/') {
-        respond(response, 200, renderIndexPage({ approvals: store.list().map(item => {
-          const record = service.get(item.request.approvalRequestId);
-          return { id: record.request.approvalRequestId, status: record.status, vendor: record.request.vendor,
-            amount: formatMinor(record.request.amountMinor, record.request.currency), currency: record.request.currency };
-        }) }), true); return;
+        const records = store.list().map(item => service.get(item.request.approvalRequestId));
+        respond(response, 200, renderIndexPage(buildIndexPageModel(records)), true); return;
       }
       const approvalRoute = /^\/approvals\/([a-zA-Z0-9_-]+)(?:\/(approve|reject))?$/.exec(path);
       if (method === 'GET' && approvalRoute && !approvalRoute[2]) {

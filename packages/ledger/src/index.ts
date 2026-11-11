@@ -5,4 +5,4 @@ export type { ChainVerification, JsonlVerification, VerificationOptions } from '
 export { InMemoryLedgerStore, openInMemoryLedger, openJsonlLedger } from './store.js';
 export type { LedgerStore } from './store.js';
 export { assertRedacted, redactValue } from './redaction.js';
-export { signedDecimalToMinor } from './money.js';
+export { currencyExponent, signedDecimalToMinor } from './money.js';

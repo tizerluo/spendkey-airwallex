@@ -1,15 +1,7 @@
 // 金额展示。只做十进制字符串拼接，不用浮点乘除，也不做四舍五入。
 
-const ZERO_EXPONENT = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'UGX', 'XOF', 'XAF']);
-const THREE_EXPONENT = new Set(['KWD', 'BHD', 'OMR', 'JOD', 'TND', 'IQD', 'LYD']);
-
-/** 币种的小数位数。表里没有的币种按 2 位处理。 */
-export function currencyExponent(currency: string): number {
-  const code = currency.trim().toUpperCase();
-  if (ZERO_EXPONENT.has(code)) return 0;
-  if (THREE_EXPONENT.has(code)) return 3;
-  return 2;
-}
+import { currencyExponent } from '@sk/ledger';
+export { currencyExponent } from '@sk/ledger';
 
 /** 把最小货币单位格式化成十进制字符串。负数带显式减号，零不带符号。 */
 export function formatMinor(minor: number, currency: string): string {

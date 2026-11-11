@@ -27,8 +27,9 @@ export async function runAgent({ intent, usage, ctx, sources, ledger, approvalSe
     price: offer.price, priceStatus: offer.priceStatus, availability: offer.availability,
   })) }, now.toISOString());
   const comparison = compareOffers(offers, usage);
+  const prices = new Map(offers.map(offer => [offer.id, offer.price]));
   ledger.append({ kind: 'comparison', candidates: comparison.candidates.map(candidate => ({
-    offerId: candidate.offerId, rail: candidate.rail, upfrontMinor: candidate.upfrontMinor,
+    offerId: candidate.offerId, rail: candidate.rail, price: prices.get(candidate.offerId)!, upfrontMinor: candidate.upfrontMinor,
     perChargeMinor: candidate.perChargeMinor, horizonLowMinor: candidate.horizonCost.lowMinor,
     horizonHighMinor: candidate.horizonCost.highMinor, notes: candidate.notes,
   })), excluded: comparison.excluded }, now.toISOString());

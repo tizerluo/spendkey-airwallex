@@ -11,6 +11,7 @@ import type {
   AuditCardSummary,
   AuditEventRow,
   AuditPageModel,
+  IndexPageModel,
 } from './models.js';
 
 /** @sk/ledger 的账本信封。服务器直接把读出的记录传进来。 */
@@ -31,6 +32,19 @@ export interface ApprovalRecordInput {
 export interface BuiltApprovalPage {
   model: ApprovalPageModel;
   csrfToken: string;
+}
+
+export interface IndexRecordInput {
+  request: Pick<ApprovalRequest, 'approvalRequestId' | 'vendor' | 'amountMinor' | 'currency'>;
+  status: ApprovalStatus;
+}
+
+/** Format index amounts in one place, preserving the store's order. */
+export function buildIndexPageModel(records: readonly IndexRecordInput[]): IndexPageModel {
+  return { approvals: records.map(({ request, status }) => ({
+    id: request.approvalRequestId, vendor: request.vendor, status,
+    amount: minorAmount(request.amountMinor, request.currency), currency: request.currency,
+  })) };
 }
 
 /** 哈希去掉 0x 前缀后的前 12 个十六进制字符。 */
@@ -69,7 +83,7 @@ export function buildApprovalPageModel(input: ApprovalRecordInput): BuiltApprova
     vendor: request.vendor,
     product: request.product,
     plan: request.plan,
-    amount: formatMinor(request.amountMinor, request.currency),
+    amount: minorAmount(request.amountMinor, request.currency),
     currency: request.currency,
     interval: request.interval,
     allowedTransactionCount: request.allowedTransactionCount,
@@ -150,7 +164,7 @@ function summarize(event: CardAuditEvent, index: LedgerIndex): string {
         ? `Decision ${event.action}`
         : `Decision ${event.action}, chosen ${event.chosenOfferId}`;
     case 'approval_requested':
-      return `Requested ${formatMinor(event.amountMinor, event.currency)} ${event.currency} for ${event.offerId}`;
+      return `Requested ${minorText(event.amountMinor, event.currency)} for ${event.offerId}`;
     case 'approval_granted':
       return event.demoAutoApproved
         ? `Granted ${event.approvalId} (demo auto-approval)`
@@ -167,8 +181,10 @@ function summarize(event: CardAuditEvent, index: LedgerIndex): string {
       const merchant = event.merchantName === undefined || event.merchantName === ''
         ? 'unknown merchant'
         : event.merchantName;
-      const amount = formatSignedDecimal(event.amount, event.currency);
-      return `${amount} ${event.currency} at ${merchant} (${event.mapped})`;
+      let amount: string;
+      try { amount = `${formatSignedDecimal(event.amount, event.currency)} ${event.currency}`; }
+      catch { amount = unformatted(event.amount, event.currency); }
+      return `${amount} at ${merchant} (${event.mapped})`;
     }
     case 'card_frozen':
       return `Frozen by ${event.by}: ${event.reason}`;
@@ -190,15 +206,33 @@ function summarize(event: CardAuditEvent, index: LedgerIndex): string {
 /** 知道币种就按币种格式化；不知道时保留最小单位，避免猜错小数位。 */
 function minorText(minor: number, currency: string | undefined): string {
   if (currency === undefined) return `${minor} minor`;
-  return `${formatMinor(minor, currency)} ${currency}`;
+  try { return `${formatMinor(minor, currency)} ${currency}`; }
+  catch { return unformatted(minor, currency); }
+}
+
+function unformatted(amount: string | number, currency: string): string {
+  return `${amount} ${currency} (unformatted)`;
+}
+
+function minorAmount(minor: number, currency: string): string {
+  try { return formatMinor(minor, currency); }
+  catch { return unformatted(minor, currency); }
+}
+
+function minorRange(low: number, high: number, currency: string): string {
+  try { return formatMinorRange(low, high, currency); }
+  catch { return unformatted(`${low}-${high}`, currency); }
 }
 
 function toAuditRow(record: LedgerRecord, index: LedgerIndex): AuditEventRow {
+  let summary: string;
+  try { summary = summarize(record.event, index); }
+  catch { summary = 'Event could not be summarized (unformatted)'; }
   const row: AuditEventRow = {
     seq: record.seq,
     at: record.at,
     kind: record.event.kind,
-    summary: summarize(record.event, index),
+    summary,
     hashShort: hashShort(record.hash),
   };
   if (record.event.kind === 'authorization') row.source = record.event.source;
@@ -217,7 +251,7 @@ function cardsFrom(events: readonly LedgerRecord[], index: LedgerIndex): AuditCa
     cards.push({
       cardId: event.cardId,
       status: event.cardStatus ?? 'unknown',
-      limit: money === undefined ? '\u2014' : formatMinor(money.minor, money.currency),
+      limit: money === undefined ? '\u2014' : minorAmount(money.minor, money.currency),
       currency: money === undefined ? '\u2014' : money.currency,
     });
   }
@@ -289,9 +323,9 @@ function comparisonRows(
       vendor: offer?.vendor ?? '\u2014',
       plan: offer?.plan ?? '\u2014',
       rail: candidate.rail,
-      upfront: formatMinor(candidate.upfrontMinor, currency),
-      perCharge: formatMinor(candidate.perChargeMinor, currency),
-      horizon: formatMinorRange(candidate.horizonLowMinor, candidate.horizonHighMinor, currency),
+      upfront: minorAmount(candidate.upfrontMinor, currency),
+      perCharge: minorAmount(candidate.perChargeMinor, currency),
+      horizon: minorRange(candidate.horizonLowMinor, candidate.horizonHighMinor, currency),
       notes: [...candidate.notes],
       passed: results.length > 0 && failedCodes.length === 0,
       failedCodes,

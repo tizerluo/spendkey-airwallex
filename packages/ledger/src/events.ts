@@ -8,6 +8,11 @@ const currency = z.string().regex(/^[A-Z]{3}$/);
 const mcc = z.string().regex(/^\d{4}$/);
 const rail = z.enum(['card', 'x402']);
 const requiredUnknown = z.unknown().refine(value => value !== undefined, 'required_json_value');
+// Native offer unit prices can be millionths (x402/USDC-style), independently of card currency scale.
+const offerPrice = z.object({
+  amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/), currency,
+  unit: z.enum(['per_month', 'per_year', 'per_call', 'per_1k_units', 'one_time']),
+}).strict();
 
 /** The M3 card contract, independent of the frozen @sr/schema audit union. */
 const CardAuditEventUnion = z.discriminatedUnion('kind', [
@@ -16,10 +21,7 @@ const CardAuditEventUnion = z.discriminatedUnion('kind', [
     offers: z.array(z.object({
       offerId: text, vendor: text, product: text,
       plan: z.enum(['monthly', 'annual', 'usage', 'one_time']), rail,
-      price: z.object({
-        amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/), currency,
-        unit: z.enum(['per_month', 'per_year', 'per_call', 'per_1k_units', 'one_time']),
-      }).strict(),
+      price: offerPrice,
       priceStatus: z.enum(['verified', 'price_unverified']),
       availability: z.enum(['available', 'region_unavailable']),
     }).strict()),
@@ -29,6 +31,8 @@ const CardAuditEventUnion = z.discriminatedUnion('kind', [
     candidates: z.array(z.object({
       offerId: text, rail, upfrontMinor: minor, perChargeMinor: minor,
       horizonLowMinor: minor, horizonHighMinor: minor, notes: z.array(z.string()),
+      // Optional for older ledgers; preserves the native unit price alongside derived minor totals.
+      price: offerPrice.optional(),
     }).strict()),
     excluded: z.array(z.object({ offerId: text, reason: z.string() }).strict()),
   }).strict(),
@@ -77,16 +81,11 @@ const CardAuditEventUnion = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('raw_response'), ref: text, endpoint: text, status: z.number().int().min(100).max(599), body: requiredUnknown }).strict(),
 ]);
 
-// Keep the discriminated union intact, then validate paired amount/currency data.
+// Card amounts retain the currency exponent; native offer prices use their own schema.
 export const CardAuditEventSchema = CardAuditEventUnion.superRefine((event, context) => {
-  const amounts = event.kind === 'authorization' ? [{ value: event.amount, currency: event.currency, path: ['amount'] }]
-    : event.kind === 'offers_snapshot' ? event.offers.map((offer, index) => ({
-      value: offer.price.amount, currency: offer.price.currency, path: ['offers', index, 'price', 'amount'],
-    })) : [];
-  for (const amount of amounts) {
-    try { signedDecimalToMinor(amount.value, amount.currency); }
-    catch { context.addIssue({ code: z.ZodIssueCode.custom, message: 'invalid_signed_decimal', path: amount.path }); }
-  }
+  if (event.kind !== 'authorization') return;
+  try { signedDecimalToMinor(event.amount, event.currency); }
+  catch { context.addIssue({ code: z.ZodIssueCode.custom, message: 'invalid_signed_decimal', path: ['amount'] }); }
 });
 
 // Zod 3 infers unknown properties as optional, even with the runtime required

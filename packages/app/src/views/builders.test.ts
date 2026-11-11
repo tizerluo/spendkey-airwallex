@@ -4,13 +4,50 @@ import type { CardAuditEvent } from '@sk/ledger';
 import { termsHash, type ApprovalRequest } from '@sk/policy';
 import { describe, expect, it } from 'vitest';
 import { renderApprovalPage, renderAuditPage } from '../index.js';
-import { buildApprovalPageModel, buildAuditPageModel, hashShort } from './builders.js';
+import { buildApprovalPageModel, buildAuditPageModel, buildIndexPageModel, hashShort } from './builders.js';
 import type { LedgerRecord } from './builders.js';
 
 const AT = '2030-01-01T00:00:00.000Z';
 const LATER = '2030-01-01T01:00:00.000Z';
 const CSRF = 'csrf-marker-01';
 const NONCE = 'nonce-secret-test-01';
+
+it('builds index rows using currency exponents and preserves record order', () => {
+  expect(buildIndexPageModel([
+    { request: request({ currency: 'JPY', amountMinor: 1250 }), status: 'requested' },
+    { request: request({ currency: 'KWD', amountMinor: 1250 }), status: 'issued' },
+    { request: request({ currency: 'ZZZ', amountMinor: 1250 }), status: 'expired' },
+  ]).approvals.map(({ amount, currency, status }) => ({ amount, currency, status }))).toEqual([
+    { amount: '1250', currency: 'JPY', status: 'requested' },
+    { amount: '1.250', currency: 'KWD', status: 'issued' },
+    { amount: '12.50', currency: 'ZZZ', status: 'expired' },
+  ]);
+  expect(buildIndexPageModel([])).toEqual({ approvals: [] });
+});
+
+it('keeps odd audit amounts visible even when the chain is broken', () => {
+  const events = purchaseEvents();
+  events.push(
+    envelope(6, { kind: 'authorization', source: 'observed', cardId: 'card_test_01', amount: '-12.50', currency: 'JPY', mapped: 'approved' }),
+    envelope(7, { kind: 'authorization', source: 'observed', cardId: 'card_test_01', amount: '-12.50', currency: 'ZZZ', mapped: 'approved' }),
+    envelope(8, { kind: 'authorization', source: 'observed', cardId: 'card_test_01', amount: '-12.50', currency: 'UNKNOWN', mapped: 'approved' }),
+    envelope(9, { kind: 'reconciliation', cardId: 'card_test_01', window: { from: AT, to: LATER },
+      settledMinor: 1.5, pendingMinor: Number.MAX_SAFE_INTEGER + 1, failedCount: 0, transactionIds: [] }),
+  );
+  const approval = events.find(({ event }) => event.kind === 'approval_requested')!.event;
+  if (approval.kind !== 'approval_requested') throw new Error('missing_test_approval');
+  approval.amountMinor = 1.5;
+  expect(() => buildAuditPageModel(events, { ok: false, error: 'hash_mismatch' })).not.toThrow();
+  const page = buildAuditPageModel(events, { ok: false, error: 'hash_mismatch' });
+  const html = renderAuditPage(page);
+  expect(html).toContain('-12.50 JPY (unformatted)');
+  expect(html).toContain('-12.50 ZZZ at');
+  expect(html).toContain('-12.50 UNKNOWN (unformatted)');
+  expect(html).toContain('Requested 1.5 USD (unformatted)');
+  expect(html).toContain('Settled 1.5 USD (unformatted), pending 9007199254740992 USD (unformatted)');
+  expect(page.cards[0]?.limit).toBe('1.5 USD (unformatted)');
+  expect(html).toContain('Chain BROKEN');
+});
 
 function request(overrides: Partial<ApprovalRequest> = {}, withMcc = true): ApprovalRequest {
   const approval: ApprovalRequest = {

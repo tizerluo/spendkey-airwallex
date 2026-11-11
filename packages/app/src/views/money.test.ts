@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { formatMinor, formatMinorRange, formatSignedDecimal } from './money.js';
 
-const ZERO_DECIMAL = ['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'UGX', 'XOF', 'XAF'];
+const ZERO_DECIMAL = ['BIF', 'CLP', 'DJF', 'GNF', 'ISK', 'JPY', 'KMF', 'KRW', 'PYG', 'RWF', 'UGX', 'UYI', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'];
 const THREE_DECIMAL = ['KWD', 'BHD', 'OMR', 'JOD', 'TND', 'IQD', 'LYD'];
 
 describe('formatMinor', () => {

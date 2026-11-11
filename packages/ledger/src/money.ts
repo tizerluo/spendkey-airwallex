@@ -1,11 +1,18 @@
 const zeroDecimal = new Set(['BIF', 'CLP', 'DJF', 'GNF', 'ISK', 'JPY', 'KMF', 'KRW', 'PYG', 'RWF', 'UGX', 'UYI', 'VND', 'VUV', 'XAF', 'XOF', 'XPF']);
 const threeDecimal = new Set(['KWD', 'BHD', 'OMR', 'JOD', 'TND', 'IQD', 'LYD']);
 
+/** Currency exponent shared by ledger validation and display; other ISO-style codes use 2. */
+export function currencyExponent(currency: string): number {
+  const code = currency.trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(code)) throw new RangeError('invalid_currency');
+  return zeroDecimal.has(code) ? 0 : threeDecimal.has(code) ? 3 : 2;
+}
+
 /** Exact signed minor units per currency; never rounds. */
 export function signedDecimalToMinor(value: string | number, currency: string): number {
   if (!/^[A-Z]{3}$/.test(currency)) throw new RangeError('invalid_currency');
   if (typeof value === 'number' && !Number.isFinite(value)) throw new RangeError('invalid_signed_decimal');
-  const exponent = zeroDecimal.has(currency) ? 0 : threeDecimal.has(currency) ? 3 : 2;
+  const exponent = currencyExponent(currency);
   const text = String(value);
   const pattern = exponent === 0 ? /^-?\d+$/ : new RegExp(`^-?\\d+(?:\\.\\d{1,${exponent}})?$`);
   if (!pattern.test(text)) throw new RangeError('invalid_signed_decimal');

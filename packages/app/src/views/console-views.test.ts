@@ -176,11 +176,12 @@ describe('renderApprovalPage', () => {
     expect(hiddenHtml).toContain('Merchant category is required at approval');
   });
 
-  it('已有商户类别代码时预填，并把属性转义', () => {
+  it('escapes an existing merchant category without prefilling the input', () => {
     const model = sampleApproval();
     model.chosen = { ...model.chosen, merchantCategoryCode: '12"<4' };
     const html = renderApprovalPage(model, { csrfToken: CSRF });
-    expect(html).toContain('value="12&quot;&lt;4"');
+    expect(html).toContain('12&quot;&lt;4');
+    expect(html).not.toMatch(/name="merchantCategoryCode"[^>]*\bvalue=/);
     expect(html).not.toContain('12"<4');
   });
 
@@ -426,7 +427,7 @@ describe('renderAuditPage', () => {
 describe('CONSOLE_CSP', () => {
   it('导出与内联样式匹配、且不含脚本的策略', () => {
     expect(CONSOLE_CSP).toBe(
-      "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     );
     expect(CONSOLE_CSP).not.toContain('unsafe-eval');
     expect(CONSOLE_CSP).not.toMatch(/script-src[^;]*unsafe-inline/);
@@ -488,4 +489,17 @@ describe('renderIndexPage', () => {
     expect(html).toContain('<h1>Approvals</h1>');
     expect(html).not.toContain('<table');
   });
+});
+
+it('marks the active console navigation and keeps images blocked by default', () => {
+  const index = renderIndexPage({ approvals: [] });
+  const approval = renderApprovalPage(sampleApproval(), { csrfToken: CSRF });
+  const audit = renderAuditPage(sampleAudit());
+  for (const html of [index, approval]) {
+    expect(html).toContain('<a href="/" aria-current="page">Approvals</a>');
+    expect(html).not.toContain('<a href="/audit" aria-current="page">');
+  }
+  expect(audit).toContain('<a href="/audit" aria-current="page">Audit</a>');
+  expect(audit).not.toContain('<a href="/" aria-current="page">');
+  expect(CONSOLE_CSP).not.toContain('img-src');
 });

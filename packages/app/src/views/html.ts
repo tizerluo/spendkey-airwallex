@@ -135,7 +135,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
  * 页面没有脚本、外链和框架，default-src 'none' 会拦住 script。
  * 服务器应原样发送这个值，不要再放宽 script-src。
  */
-export const CONSOLE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+export const CONSOLE_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 
 /** 拼出完整 HTML 文档。没有脚本，调用方不能再往文档末尾追加内容。 */
 export function renderDocument(title: string, body: string): string {
@@ -157,13 +157,13 @@ ${body}
 }
 
 /** 三个页面共用的页头、主区域和页脚。 */
-export function consoleBody(main: string): string {
+export function consoleBody(main: string, current: 'approvals' | 'audit'): string {
   return `<a class="skip" href="#content">Skip to content</a>
 <header class="top">
 <p class="brand"><a href="/">Spendkey for Cards</a></p>
 <nav aria-label="Console">
-<a href="/">Approvals</a>
-<a href="/audit">Audit</a>
+<a href="/"${current === 'approvals' ? ' aria-current="page"' : ''}>Approvals</a>
+<a href="/audit"${current === 'audit' ? ' aria-current="page"' : ''}>Audit</a>
 </nav>
 </header>
 <main id="content">

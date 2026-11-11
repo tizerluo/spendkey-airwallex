@@ -258,7 +258,8 @@ describe('currency exponents and terms binding', () => {
     expect(() => signedDecimalToMinor('1', currency)).toThrow('invalid_currency');
   });
 
-  it.each([['JPY', '100', true], ['JPY', '100.01', false], ['KWD', '1.234', true], ['KWD', '1.2345', false]] as const)(
+  it.each([['JPY', '100', true], ['JPY', '100.01', true], ['KWD', '1.234', true], ['KWD', '1.2345', true],
+    ['USD', '0.000001', true], ['USD', '0.0000001', false], ['USD', '-0.000001', false]] as const)(
     'validates offer price precision for %s %s', (currency, amount, valid) => {
       const result = CardAuditEventSchema.safeParse({ kind: 'offers_snapshot', intent: 'test purchase', offers: [{
         offerId: 'offer_test_01', vendor: 'Test Vendor', product: 'Test Product', plan: 'one_time', rail: 'card',

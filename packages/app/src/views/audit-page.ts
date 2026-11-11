@@ -10,7 +10,7 @@ export function renderAuditPage(model: AuditPageModel): string {
 ${verifyLine(model)}
 ${eventsSection(model)}
 ${cardsSection(model)}`;
-  return renderDocument('Audit log', consoleBody(main));
+  return renderDocument('Audit log', consoleBody(main, 'audit'));
 }
 
 /** 链状态只用文字徽章表达，不单靠颜色。 */

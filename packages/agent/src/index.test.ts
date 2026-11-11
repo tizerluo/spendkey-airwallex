@@ -49,9 +49,15 @@ describe('agent trust boundary', () => {
   });
   it('never submits an x402 candidate', async () => {
     const submit = vi.fn();
+    const ledger = new InMemoryLedgerStore();
     const result = await runAgent({ intent: 'api', usage: { horizonMonths: 12, callsPerMonth: { low: 1000, high: 5000 } },
-      ctx: context(), sources: [createX402SnapshotSource([{ resource: 'https://synthetic.example/api', description: 'Synthetic API', priceUsdc: '0.01', network: 'celo', capturedAt: '2026-11-01T00:00:00.000Z' }])], ledger: new InMemoryLedgerStore(), approvalService: { submit } });
+      ctx: context(), sources: [createX402SnapshotSource([{ resource: 'https://synthetic.example/api', description: 'Synthetic API', priceUsdc: '0.000001', network: 'celo', capturedAt: '2026-11-01T00:00:00.000Z' }])], ledger, approvalService: { submit } });
     expect(result.decision.action).toBe('refuse'); expect(submit).not.toHaveBeenCalled();
+    expect(ledger.read()[0]?.event).toMatchObject({ kind: 'offers_snapshot', offers: [{ price: { amount: '0.000001' } }] });
+    expect(ledger.read()[1]?.event).toMatchObject({ kind: 'comparison', candidates: [{
+      price: { amount: '0.000001', unit: 'per_call' }, perChargeMinor: 1, horizonLowMinor: 12, horizonHighMinor: 12,
+    }] });
+    expect(verifyChain(ledger.read()).ok).toBe(true);
   });
   it('HTTP submission returns only the id through explicit transport', async () => {
     const transport = vi.fn(async () => new Response('{"id":"request_test"}', { status: 201 }));

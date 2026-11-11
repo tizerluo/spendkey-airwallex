@@ -2,8 +2,9 @@
 
 Server-rendered console views for Spendkey for Cards. A person approves the
 exact purchase terms, then a virtual card is issued against that approval.
-This package currently contains **only the HTML views**. The HTTP server will
-be added later under `src/server`; it is intentionally not here.
+The package includes HTML views, the loopback approval server under `src/server`,
+and an offline demo under `src/demo`. The server sends `CONSOLE_CSP`, verifies
+CSRF and expiry, and refuses approvals on a non-card rail.
 
 There is no framework and no external stylesheet, font, image, or script.
 Each render function returns a complete HTML document. The terms hash is
@@ -24,6 +25,7 @@ import {
   CONSOLE_CSP,
   buildApprovalPageModel,
   buildAuditPageModel,
+  buildIndexPageModel,
   formatMinor,
   renderApprovalPage,
   renderAuditPage,
@@ -41,7 +43,7 @@ const approval = buildApprovalPageModel({
 });
 const approvalHtml = renderApprovalPage(approval.model, { csrfToken: approval.csrfToken });
 const auditHtml = renderAuditPage(buildAuditPageModel(ledger.read(), verifyChain(ledger.read())));
-const indexHtml = renderIndexPage({ approvals });
+const indexHtml = renderIndexPage(buildIndexPageModel(records));
 response.setHeader('Content-Security-Policy', CONSOLE_CSP);
 formatMinor(5000, 'USD'); // "50.00"
 ```
@@ -49,7 +51,7 @@ formatMinor(5000, 'USD'); // "50.00"
 Send `CONSOLE_CSP` unchanged:
 
 ```
-default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'
+default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'
 ```
 
 `default-src 'none'` blocks scripts. `style-src 'unsafe-inline'` is required
@@ -111,8 +113,9 @@ card numbers on these pages are masked.
 `formatMinor(minor, currency)` formats an integer minor amount.
 `formatSignedDecimal(amount, currency)` formats a signed decimal string such
 as `-12.50` or `+3`. `formatMinorRange` prints `low-high`, or one number when
-the ends match. Exponent 0: JPY, KRW, VND, CLP, ISK, UGX, XOF, XAF. Exponent
-3: KWD, BHD, OMR, JOD, TND, IQD, LYD. Every other currency uses 2. Negatives
+the ends match. Both formatting and ledger validation use `currencyExponent`
+exported by `@sk/ledger`, including all zero- and three-decimal currencies.
+Other three-letter codes use 2. Negatives
 get an ASCII minus. Zero has no sign. The helpers concatenate decimal digits
 and never use binary floating point. Extra non-zero fraction digits throw
 instead of rounding.
@@ -130,6 +133,16 @@ The model does not contain the csrf token or the nonce.
 `hashShort` is the first 12 hex characters after an optional `0x` prefix.
 Per-kind summaries live in that one function. `verifyResult` is the ledger
 `ChainVerification`. When `ok` is true, `verifyError` is omitted.
+
+`buildIndexPageModel(records)` accepts records with `request` and `status`,
+formats their amounts, and preserves their order. Audit builders catch money
+formatting errors and show `<raw amount> <currency> (unformatted)` so odd or
+tampered rows remain visible.
+
+`chosen.rail` is required in the view model and is filled from the policy request.
+The server sets `demoMode` before approval when running the demo; ledger-only
+builders infer it from a recorded demo auto-approval. Navigation marks the
+current section with `aria-current="page"`.
 
 `priceStatus`, `interval`, and `allowedTransactionCount` on the chosen terms
 use the same unions as `@sk/policy` `ApprovalRequest` and the ledger
