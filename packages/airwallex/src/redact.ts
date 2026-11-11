@@ -1,41 +1,42 @@
-/** 连续 13 位及以上，或中间只隔一个空格/横线的 13–19 位数字。 */
+/** 13 or more consecutive digits, or 13–19 digits separated only by a single space/hyphen. */
 const CONSECUTIVE_PAN = /\d{13,}/;
 const SPACED_PAN = /\d(?:[ -]?\d){12,18}/;
 
-/** 忽略分隔符后的数字个数。 */
+/** Digit count after ignoring separators. */
 export function digitCount(value: string): number {
   return value.replace(/\D/g, '').length;
 }
 
-/** 无掩码时应当丢弃的卡号形态。digitCount 覆盖散落数字，间距正则覆盖空格和横线。 */
+/** Card-number shapes to drop when unmasked. digitCount covers scattered digits; the spacing regex covers spaces and hyphens. */
 export function isPanLike(value: string): boolean {
   return digitCount(value) >= 13 || SPACED_PAN.test(value);
 }
 
-/** 与 maskedNumberSchema 使用同一组掩码字符。 */
+/** Uses the same mask characters as maskedNumberSchema. */
 export function hasMaskChar(value: string): boolean {
   return /[*xX•●#]/.test(value);
 }
 
 /**
- * 抹掉掩码字符后仍有 13 位及以上数字时整段换成 [redacted]。
- * 掩码字符不构成豁免，否则 4111 - 1111 - 1111 - 1111 x 这类值会漏过。
- * 合法掩码至多 10 位数字，不受影响。
- * 否则先抹连续长串（避免 20 位只截前 19 位），再抹任意非字母分隔符隔开的 13–19 位，
- * 最后抹用掩码字母 x/X 隔开的长数字（x 是字母，上一则正则不会跨越它）。
+ * If 13 or more digits remain after removing mask characters, replace the whole segment with [redacted].
+ * Mask characters are not an exemption; otherwise values like 4111 - 1111 - 1111 - 1111 x would slip through.
+ * A valid mask has at most 10 digits and is unaffected.
+ * Otherwise scrub consecutive long runs first (so 20 digits are not only partly cut), then 13–19 digits
+ * separated by any non-letter delimiter, and finally long digit runs separated by the mask letters x/X
+ * (x is a letter, so the previous regex will not cross it).
  */
 export function redactSensitiveText(value: string): string {
   if (digitCount(value.replace(/[*xX•●#]+/g, '')) >= 13) return '[redacted]';
   return value
     .replace(/\d{13,}/g, '[redacted]')
-    // 非字母分隔符，外加掩码字母 x/X。x 不在 [^\dA-Za-z] 里，否则 4111x1111… 会留在 raw。
+    // Non-letter delimiters plus the mask letters x/X. x is not in [^\dA-Za-z], otherwise 4111x1111… would remain in raw.
     .replace(/\d(?:[^\dA-Za-z]{0,2}\d){12,18}/g, '[redacted]')
     .replace(/\d(?:(?:[^\dA-Za-z]|[xX]){0,2}\d){12,18}/g, '[redacted]');
 }
 
-/** 非 JSON 正文只留长度和脱敏后的前 200 字。length 是原文长度。 */
+/** For non-JSON bodies keep only the length and the first 200 redacted characters. length is the original length. */
 export function nonJsonDiagnostic(text: string, length = text.length): { nonJson: true; length: number; head: string } {
-  // 命中的键之后整行都不可信：Bearer/Basic 方案和带引号、含空格的值都可能在键后面。
+  // Everything after a matched key is untrusted: Bearer/Basic schemes and quoted or space-containing values can follow the key.
   const scrubbed = redactSensitiveText(text.replace(
     /(pan|card_?number|cvv|cvc|token|secret|key|password|auth|security|verification)[^,&;\s]*\s*[:=][^\n]*/gi,
     '[redacted]',
@@ -50,7 +51,7 @@ function isDigitLike(value: unknown): boolean {
 }
 
 function keepKey(key: string, value: unknown): boolean {
-  // 展示用掩码和消费控制不是凭证。比较时忽略大小写，避免 MASKED_CARD_NUMBER 被误删。
+  // Display masks and spending controls are not credentials. Compare case-insensitively so MASKED_CARD_NUMBER is not dropped.
   const normalized = key.toLowerCase();
   if (normalized === 'masked_card_number' || normalized === 'authorization_controls') return true;
   if (/^pin$/i.test(normalized)) return false;
@@ -66,12 +67,12 @@ export function redactBody(value: unknown, redactString: (value: string) => stri
     if (typeof item === 'string') {
       const scrubbed = redactString(item);
       const trimmed = scrubbed.trimStart();
-      // 字符串里再嵌一层 JSON 时先解析再走键规则，否则 cvv/token 只会留在文本里。
+      // If a string contains another layer of JSON, parse it and apply the key rules; otherwise cvv/token would remain as text.
       if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
         try {
           return walk(JSON.parse(trimmed) as unknown, depth + 1);
         } catch {
-          // 不是合法 JSON，按普通文本脱敏。
+          // Not valid JSON; redact as plain text.
         }
       }
       return redactSensitiveText(scrubbed);

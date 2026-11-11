@@ -269,7 +269,7 @@ describe('redaction before storage', () => {
     for (const store of stores) {
       expect(() => assertRedacted(body)).toThrow(/^ledger_redaction_required$/);
       const event = { ...basic, hidden: body } as CardAuditEvent;
-      // 未知容器在脱敏后仍过不了严格 schema，因此不会落盘。
+      // An unknown container still fails the strict schema after redaction, so it is never persisted.
       expect(() => store.append(event, AT)).toThrow(/^invalid_card_audit_event$/);
       expect(store.read()).toEqual([]);
     }

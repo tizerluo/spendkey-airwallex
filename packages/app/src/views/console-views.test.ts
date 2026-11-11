@@ -121,7 +121,7 @@ function formSlice(html: string, action: string): string {
 }
 
 describe('escapeHtml', () => {
-  it('转义文本和属性里会打破 HTML 的字符，并且不二次转义', () => {
+  it('escapes characters that break HTML in text and attributes, and does not double-escape', () => {
     expect(escapeHtml(PAYLOAD)).toBe(ESCAPED);
     expect(escapeHtml('a&b')).toBe('a&amp;b');
     expect(escapeHtml(`'`)).toBe('&#39;');
@@ -131,7 +131,7 @@ describe('escapeHtml', () => {
 });
 
 describe('renderApprovalPage', () => {
-  it('转义意图、供应商、备注和卡片展示字段', () => {
+  it('escapes intent, vendor, notes, and card display fields', () => {
     const model = sampleApproval();
     const [first, second] = model.comparison;
     if (first === undefined || second === undefined) throw new Error('missing comparison fixture');
@@ -150,7 +150,7 @@ describe('renderApprovalPage', () => {
     expectNoActiveContent(html);
   });
 
-  it('属性值里的引号和尖括号也被转义', () => {
+  it('quotes and angle brackets in attribute values are escaped too', () => {
     const model = sampleApproval();
     model.presentedTermsHash = `abc&<>"'`;
     const html = renderApprovalPage(model, { csrfToken: `tok&"<` });
@@ -160,7 +160,7 @@ describe('renderApprovalPage', () => {
     expect(html).not.toContain(`value="abc&<>"'"`);
   });
 
-  it('needsMcc 决定商户类别输入框是否出现', () => {
+  it('needsMcc controls whether the merchant category input appears', () => {
     const shown = sampleApproval();
     shown.reasons = ['human_approval_required'];
     const shownHtml = renderApprovalPage(shown, { csrfToken: CSRF });
@@ -186,7 +186,7 @@ describe('renderApprovalPage', () => {
     expect(html).not.toContain('12"<4');
   });
 
-  it('只展示 nonce 提示，不把 nonce 写进页面', () => {
+  it('shows only the nonce hint and never writes the nonce into the page', () => {
     const html = renderApprovalPage(sampleApproval(), { csrfToken: CSRF });
     expect(html).toContain('nonce printed in operator terminal');
     expect(html).toContain('<label for="approval-nonce">Approval nonce</label>');
@@ -195,7 +195,7 @@ describe('renderApprovalPage', () => {
     expect(html).not.toMatch(/name="nonce"[^>]*\bvalue=/);
   });
 
-  it('x402 行标明不能用卡支付，地区不可用的报价有排除说明', () => {
+  it('x402 rows say card payment is unavailable; region-unavailable offers get an exclusion note', () => {
     const html = renderApprovalPage(sampleApproval(), { csrfToken: CSRF });
     expect(html).toContain('not payable by card (x402)');
     expect(html).toContain('class="x402"');
@@ -205,7 +205,7 @@ describe('renderApprovalPage', () => {
     expect(html).toContain('offer_region_01');
   });
 
-  it('关键文案、条款和两个 POST 表单都在', () => {
+  it('key copy, terms, and both POST forms are present', () => {
     const model = sampleApproval();
     model.card = { cardId: 'card_test_01', maskedNumber: '****0000', status: 'ACTIVE' };
     const html = renderApprovalPage(model, { csrfToken: CSRF });
@@ -270,7 +270,7 @@ describe('renderApprovalPage', () => {
     expect(reject).not.toContain('name="merchantCategoryCode"');
   });
 
-  it('关闭演示模式时不出现演示横幅', () => {
+  it('no demo banner when demo mode is off', () => {
     const model = sampleApproval();
     model.demoMode = false;
     expect(renderApprovalPage(model, { csrfToken: CSRF })).not.toContain(
@@ -278,7 +278,7 @@ describe('renderApprovalPage', () => {
     );
   });
 
-  it('非 requested 状态禁用整个 fieldset', () => {
+  it('a non-requested status disables the whole fieldset', () => {
     const model = sampleApproval();
     model.status = 'expired';
     const html = renderApprovalPage(model, { csrfToken: CSRF });
@@ -292,7 +292,7 @@ describe('renderApprovalPage', () => {
     expectNoActiveContent(html);
   });
 
-  it('x402 即使规则通过，结果列也是 Not payable by card', () => {
+  it('even when rules pass, an x402 row result column is Not payable by card', () => {
     const model = sampleApproval();
     const row = model.comparison[1];
     if (row === undefined) throw new Error('missing x402 row');
@@ -305,7 +305,7 @@ describe('renderApprovalPage', () => {
     expectNoActiveContent(html);
   });
 
-  it('选中的 rail 不是 card 时不渲染批准表单', () => {
+  it('no approval form is rendered when the chosen rail is not card', () => {
     const model = sampleApproval();
     model.chosen = { ...model.chosen, rail: 'x402' };
     const html = renderApprovalPage(model, { csrfToken: CSRF });
@@ -317,7 +317,7 @@ describe('renderApprovalPage', () => {
     expectNoActiveContent(html);
   });
 
-  it('卡通道失败时结果列写出失败代码', () => {
+  it('the result column names the failure code when the card rail fails', () => {
     const model = sampleApproval();
     const row = model.comparison[0];
     if (row === undefined) throw new Error('missing card row');
@@ -326,7 +326,7 @@ describe('renderApprovalPage', () => {
     expect(html).toContain('Failed: reserve_breach');
   });
 
-  it('审批 id 进路径时按段编码，页面文本仍然转义', () => {
+  it('approval ids are segment-encoded in paths while page text stays escaped', () => {
     const model = sampleApproval();
     model.approvalRequestId = 'req <1>';
     const html = renderApprovalPage(model, { csrfToken: CSRF });
@@ -338,7 +338,7 @@ describe('renderApprovalPage', () => {
 });
 
 describe('renderAuditPage', () => {
-  it('链断裂时显示徽章，并转义摘要和校验错误', () => {
+  it('shows the badge when the chain is broken and escapes the summary and verify error', () => {
     const model = sampleAudit();
     model.chainValid = false;
     model.verifyError = PAYLOAD;
@@ -356,7 +356,7 @@ describe('renderAuditPage', () => {
     expectNoActiveContent(html);
   });
 
-  it('链完整时忽略 verifyError', () => {
+  it('ignores verifyError when the chain is valid', () => {
     const model = sampleAudit();
     model.verifyError = PAYLOAD;
     const html = renderAuditPage(model);
@@ -366,7 +366,7 @@ describe('renderAuditPage', () => {
     expect(html).not.toContain('role="alert"');
   });
 
-  it('授权没有来源时写成 source missing，发卡未确认用警告样式', () => {
+  it('an authorization without a source shows source missing; unconfirmed issuance uses warning styling', () => {
     const model = sampleAudit();
     const simulated = model.events[1];
     if (simulated === undefined) throw new Error('missing authorization');
@@ -394,7 +394,7 @@ describe('renderAuditPage', () => {
     expectNoActiveContent(html);
   });
 
-  it('链完整时显示 Chain valid，并区分模拟与观测', () => {
+  it('shows Chain valid when the chain is complete and distinguishes simulated from observed', () => {
     const html = renderAuditPage(sampleAudit());
     expect(html).toContain('Chain valid');
     expect(html).not.toContain('Chain BROKEN');
@@ -414,7 +414,7 @@ describe('renderAuditPage', () => {
     expectNoActiveContent(html);
   });
 
-  it('离线模式把授权标成 emulated，页面里没有 sandbox', () => {
+  it('offline mode labels authorizations emulated and the page contains no sandbox', () => {
     const model = sampleAudit();
     model.runMode = 'offline_emulator';
     model.events.push({
@@ -442,7 +442,7 @@ describe('renderAuditPage', () => {
     expectNoActiveContent(html);
   });
 
-  it('没有 runMode 时授权列写 mode unknown', () => {
+  it('authorization columns say mode unknown when there is no runMode', () => {
     const model = sampleAudit();
     delete model.runMode;
     const html = renderAuditPage(model);
@@ -453,7 +453,7 @@ describe('renderAuditPage', () => {
     expect(html.toLowerCase()).not.toContain('sandbox');
   });
 
-  it('没有事件和卡片时给出空状态', () => {
+  it('shows empty states when there are no events or cards', () => {
     const model = sampleAudit();
     model.events = [];
     model.cards = [];
@@ -465,7 +465,7 @@ describe('renderAuditPage', () => {
 });
 
 describe('CONSOLE_CSP', () => {
-  it('导出与内联样式匹配、且不含脚本的策略', () => {
+  it('exports a policy that allows inline styles and no scripts', () => {
     expect(CONSOLE_CSP).toBe(
       "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     );
@@ -475,7 +475,7 @@ describe('CONSOLE_CSP', () => {
 });
 
 describe('renderIndexPage', () => {
-  it('转义供应商，并按顺序链到审批页', () => {
+  it('escapes the vendor and links to approval pages in order', () => {
     const html = renderIndexPage({
       approvals: [
         { id: 'approval_request_test_01', status: 'requested', vendor: PAYLOAD, amount: '50.00', currency: 'USD' },
@@ -496,7 +496,7 @@ describe('renderIndexPage', () => {
     expect(html.indexOf('approval_request_test_01')).toBeLessThan(html.indexOf('>a/b</a>'));
   });
 
-  it('转义 hashShort、status、id、reason 和 cardId', () => {
+  it('escapes hashShort, status, id, reason, and cardId', () => {
     const approval = sampleApproval();
     approval.reasons = [PAYLOAD];
     approval.excluded = [{ offerId: 'offer_region_01', reason: PAYLOAD }];
@@ -523,7 +523,7 @@ describe('renderIndexPage', () => {
     expectNoActiveContent(indexHtml);
   });
 
-  it('没有审批请求时显示空状态', () => {
+  it('shows an empty state when there are no approval requests', () => {
     const html = renderIndexPage({ approvals: [] });
     expect(html).toContain('No approval requests.');
     expect(html).toContain('<h1>Approvals</h1>');
@@ -532,7 +532,7 @@ describe('renderIndexPage', () => {
     expect(html).not.toContain('<table');
   });
 
-  it('列表页和审批页按传入的模式标注，离线时不写 sandbox', () => {
+  it('the list and approval pages use the supplied mode and omit sandbox when offline', () => {
     const indexHtml = renderIndexPage({
       runMode: 'offline_emulator',
       approvals: [{ id: 'approval_request_test_01', status: 'requested', vendor: 'Example Vendor', amount: '50.00', currency: 'USD' }],

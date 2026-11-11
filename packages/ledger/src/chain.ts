@@ -9,7 +9,7 @@ function hashRecord(record: Omit<LedgerEvent, 'hash'>): string {
   return `0x${sha256Hex(canonicalize(record))}`;
 }
 
-/** 按时间点比较，相等允许；带偏移的同一时刻不算回退。 */
+/** Compare instants; equality is allowed, and the same moment with an offset is not a regression. */
 function earlierInstant(at: string, previous: string): boolean {
   return Date.parse(at) < Date.parse(previous);
 }
@@ -50,8 +50,9 @@ export function appendEvent(events: readonly LedgerEvent[], event: CardAuditEven
   assertValidChain(events);
   const previousAt = events.at(-1)?.at;
   if (previousAt !== undefined && earlierInstant(at, previousAt)) throw new Error('non_monotonic_timestamp');
-  // 先整条脱敏再守卫：普通文案保留，高置信度形态变成 [REDACTED]，敏感键删除。
-  // 哈希覆盖的是存储后的脱敏事件，而不是调用方传入的原文。
+  // Redact the whole event before the guard: ordinary text is kept, high-confidence
+  // patterns become [REDACTED], and sensitive keys are dropped. The hash covers the
+  // stored redacted event, not the caller's original input.
   const sanitized: unknown = redactValue(event);
   assertRedacted(sanitized);
   if (!CardAuditEventSchema.safeParse(sanitized).success) throw new Error('invalid_card_audit_event');

@@ -3,7 +3,7 @@ import { AirwallexApiError, AirwallexResponseError } from '@sk/airwallex';
 import { redactValue, signedDecimalToMinor } from '@sk/ledger';
 import { ServiceError } from '../server/service.js';
 
-/** 只接受短的枚举样式。超长、带空格或连续 13 位数字（卡号形态）都不打印。 */
+/** Accept only short enum-style values. Overlong values, values with spaces, or 13+ consecutive digits (card-number shape) are not printed. */
 const OBSERVED_ENUM = /^[A-Za-z0-9_]{1,32}$/;
 const PRINTABLE_FAILURE = /^(approval_store_(stale_lock|locked):|demo_[a-z_]+(?: observed_(?:primary_currency|cardholder_status)=[A-Za-z0-9_]{1,32})?$)/;
 
@@ -40,7 +40,7 @@ export function describeDemoFailure(error: unknown, step: string): string {
     return detail ? `${step}: invalid Airwallex response shape ${detail}` : `${step}: invalid Airwallex response shape`;
   }
   if (error instanceof ServiceError) return `${step}: ${error.code}`;
-  // 十三位以上数字一律不打印，避免观测值通道把卡号带回终端。
+  // Never print 13+ digit numbers, so the observed-value channel cannot bring a card number back to the terminal.
   if (error instanceof Error && PRINTABLE_FAILURE.test(error.message) && !/\d{13,}/.test(error.message)) return `${step}: ${error.message}`;
   return `${step}: failed; inspect the local ledger and recover/freeze any unconfirmed issuance`;
 }

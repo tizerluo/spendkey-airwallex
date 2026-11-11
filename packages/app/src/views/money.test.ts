@@ -7,7 +7,7 @@ const ZERO_DECIMAL = ['BIF', 'CLP', 'DJF', 'GNF', 'ISK', 'JPY', 'KMF', 'KRW', 'P
 const THREE_DECIMAL = ['KWD', 'BHD', 'OMR', 'JOD', 'TND', 'IQD', 'LYD'];
 
 describe('formatMinor', () => {
-  it('按币种小数位格式化美元、日元和科威特第纳尔', () => {
+  it('formats USD, JPY, and KWD by currency decimal places', () => {
     expect(formatMinor(2500, 'USD')).toBe('25.00');
     expect(formatMinor(1, 'USD')).toBe('0.01');
     expect(formatMinor(0, 'USD')).toBe('0.00');
@@ -19,7 +19,7 @@ describe('formatMinor', () => {
     expect(formatMinor(0, 'KWD')).toBe('0.000');
   });
 
-  it('负数带显式减号，零不带符号', () => {
+  it('negative values get an explicit minus sign; zero has no sign', () => {
     expect(formatMinor(-1250, 'USD')).toBe('-12.50');
     expect(formatMinor(-20, 'USD')).toBe('-0.20');
     expect(formatMinor(-3, 'JPY')).toBe('-3');
@@ -28,20 +28,20 @@ describe('formatMinor', () => {
     expect(formatMinor(-0, 'JPY')).toBe('0');
   });
 
-  it('大整数不丢精度，也不加千分位', () => {
+  it('large integers keep precision and get no thousands separators', () => {
     expect(formatMinor(9007199254740991, 'USD')).toBe('90071992547409.91');
     expect(formatMinor(9007199254740991, 'JPY')).toBe('9007199254740991');
     expect(formatMinor(-9007199254740991, 'KWD')).toBe('-9007199254740.991');
   });
 
-  it('零小数和三小数币种走同一张表，其余默认两位', () => {
+  it('zero- and three-decimal currencies share one table; the rest default to two', () => {
     for (const code of ZERO_DECIMAL) expect(formatMinor(10, code)).toBe('10');
     for (const code of THREE_DECIMAL) expect(formatMinor(10, code)).toBe('0.010');
     expect(formatMinor(10, 'usd')).toBe('0.10');
     expect(formatMinor(10, 'EUR')).toBe('0.10');
   });
 
-  it('拒绝不是安全整数的最小单位', () => {
+  it('rejects minor units that are not safe integers', () => {
     expect(() => formatMinor(1.5, 'USD')).toThrow(RangeError);
     expect(() => formatMinor(Number.NaN, 'USD')).toThrow(RangeError);
     expect(() => formatMinor(Number.POSITIVE_INFINITY, 'JPY')).toThrow(RangeError);
@@ -49,7 +49,7 @@ describe('formatMinor', () => {
 });
 
 describe('formatSignedDecimal', () => {
-  it('对齐美元、日元、第纳尔，并给负数显式符号', () => {
+  it('aligns USD, JPY, and KWD and gives negative values an explicit sign', () => {
     expect(formatSignedDecimal('-12.50', 'USD')).toBe('-12.50');
     expect(formatSignedDecimal('+3', 'JPY')).toBe('3');
     expect(formatSignedDecimal('-3', 'JPY')).toBe('-3');
@@ -59,13 +59,13 @@ describe('formatSignedDecimal', () => {
     expect(formatSignedDecimal('00012.5', 'USD')).toBe('12.50');
   });
 
-  it('超长十进制保持原样，不经过浮点', () => {
+  it('very long decimals pass through untouched, without floating point', () => {
     expect(formatSignedDecimal('999999999999999999.99', 'USD')).toBe('999999999999999999.99');
     expect(formatSignedDecimal('-999999999999999999.99', 'USD')).toBe('-999999999999999999.99');
     expect(formatSignedDecimal('1.2300', 'USD')).toBe('1.23');
   });
 
-  it('多出来的非零小数直接拒绝，避免舍入', () => {
+  it('extra non-zero decimals are rejected outright to avoid rounding', () => {
     expect(() => formatSignedDecimal('1.239', 'USD')).toThrow(RangeError);
     expect(() => formatSignedDecimal('12.50', 'JPY')).toThrow(RangeError);
     expect(() => formatSignedDecimal('1e2', 'USD')).toThrow(RangeError);
@@ -75,7 +75,7 @@ describe('formatSignedDecimal', () => {
 });
 
 describe('formatMinorRange', () => {
-  it('高低不同时用连字符，相同只显示一个数', () => {
+  it('use a hyphen when the bounds differ; show one number when equal', () => {
     expect(formatMinorRange(12, 120, 'USD')).toBe('0.12-1.20');
     expect(formatMinorRange(5000, 5000, 'USD')).toBe('50.00');
     expect(formatMinorRange(0, 3, 'JPY')).toBe('0-3');

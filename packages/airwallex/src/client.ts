@@ -16,14 +16,14 @@ import type {
   Card, CardsResponse, CreateCardResult, ListCardsInput, ListTransactionsInput, SimulateAuthorizationInput,
 } from './schemas.js';
 
-/** 默认 30 秒。AbortSignal.timeout 的计时器是 unref 的，完成的请求不会把进程挂住。 */
+/** Default 30 seconds. AbortSignal.timeout timers are unref'd, so completed requests do not keep the process alive. */
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 export interface AirwallexClientOptions {
   fetch: typeof globalThis.fetch;
   /** Injectable clock for deterministic offline token-expiry tests. */
   now?: () => number;
-  /** 单次 HTTP 超时（毫秒）。默认 30000。测试可注入更短的值。 */
+  /** Per-request HTTP timeout in milliseconds. Default 30000. Tests can inject a shorter value. */
   timeoutMs?: number;
 }
 
@@ -35,7 +35,7 @@ function requestTimeout(value: number | undefined): number {
   return value;
 }
 
-/** 即使注入的 fetch 忽略 signal，也要在超时后失败，不能一直挂起。 */
+/** Fail on timeout even if the injected fetch ignores the signal; never hang forever. */
 function raceSignal<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -66,7 +66,7 @@ function isTimeoutFailure(error: unknown, signal: AbortSignal): boolean {
   return isTimeoutReason(error) || (signal.aborted && isTimeoutReason(signal.reason));
 }
 
-/** 只收集路径和代码。union 展开到子问题，避免把 message / received 带出来。 */
+/** Collect paths and codes only. Expand unions into sub-issues so message / received values are not exposed. */
 function zodIssues(error: z.ZodError): AirwallexResponseIssue[] {
   const collected: AirwallexResponseIssue[] = [];
   const visit = (issues: readonly z.ZodIssue[]): void => {
@@ -124,7 +124,7 @@ export function assertSafeCardPath(path: string): void {
   }
 }
 
-/** 用原始条目的 card_id 判断下一页是不是上一页的重复。 */
+/** Use the raw item's card_id to detect when the next page repeats the previous page. */
 function firstCardId(items: unknown[]): string | undefined {
   const first = items[0];
   if (first === undefined || first === null || typeof first !== 'object' || Array.isArray(first)) return undefined;
@@ -161,7 +161,7 @@ export class AirwallexClient {
 
   async #send(path: string, init: RequestInit): Promise<Response> {
     assertSafeCardPath(path);
-    // 超时只抛一次。createCard 不会在这里重试，调用方走既有的只查不建恢复。
+    // Timeout throws only once. createCard does not retry here; the caller uses the existing query-only, no-create recovery.
     const signal = AbortSignal.timeout(this.#timeoutMs);
     try {
       // Never follow a redirect carrying credentials to a different destination.
@@ -291,7 +291,7 @@ export class AirwallexClient {
       const text = await response.text();
       try { received = JSON.parse(text) as unknown; }
       catch {
-        // 非 JSON 的 2xx 不能原样留下 key=value 凭证，只保留长度和脱敏后的前 200 字。
+        // A non-JSON 2xx must not retain key=value credentials verbatim; keep only the length and the first 200 redacted characters.
         received = nonJsonDiagnostic(this.#redact(text), text.length);
       }
     } catch { received = { bodyReadFailed: true }; }
@@ -317,14 +317,14 @@ export class AirwallexClient {
       if (input[key] !== undefined) query.set(names[key], input[key]);
     }
     const result: CardsResponse = { items: [], unparsed: [] };
-    // 硬上限：服务端一直声称还有下一页时必须停，不能无限翻页。
+    // Hard cap: stop when the server keeps claiming another page; never page forever.
     const maxPages = 200;
     let previousFirstId: string | undefined;
     for (let page = 0; page < maxPages; page++) {
       query.set('page_num', String(page));
       const response = await this.#request('GET', `/api/v1/issuing/cards?${query.toString()}`, cardsPageSchema);
       const firstId = firstCardId(response.items);
-      // 忽略 page_num 时会重复上一页的第一张卡，立刻停，避免打满 200 次请求。
+      // A server that ignores page_num repeats the first card from the previous page; stop immediately to avoid 200 requests.
       if (previousFirstId !== undefined && firstId === previousFirstId) return result;
       previousFirstId = firstId;
       for (const item of response.items) {
@@ -341,17 +341,17 @@ export class AirwallexClient {
   }
 
   async findCardByRequestId(requestId: string, input: Pick<ListCardsInput, 'cardholderId' | 'createdAfter'> = {}): Promise<(Card & { listTruncated?: true }) | undefined> {
-    // 列表接口要同时有创建时间上下界才不用默认窗口。只有 createdAfter 时才补上当前时刻。
+    // The list endpoint needs both created-time bounds to skip the default window. Add the current time only when createdAfter is set.
     const cards = await this.#collectCards({ ...input,
       ...(input.createdAfter === undefined ? {} : { createdBefore: new Date(this.#now()).toISOString() }),
     }, 'truncate');
-    // 多条明确的 request_id 只返回第一条。
+    // Multiple explicit request_ids: return only the first.
     const explicit = cards.items.find(card => card.request_id === requestId);
-    // 昵称会被截到 50 字符。截断后不同 requestId 会撞车，这时只认明确的 request_id。
+    // Nicknames are truncated to 50 characters, so different requestIds can collide after truncation; in that case accept only an explicit request_id.
     const matched = explicit ?? (`spk ${requestId}`.length > CARD_NICKNAME_MAX_LENGTH ? undefined
       : cards.items.find(card => card.request_id === undefined && card.nick_name === cardNicknameFromRequestId(requestId)));
     if (matched === undefined) return undefined;
-    // 页数打满时仍交回已经看到的匹配，并标上截断，避免直接抛错把恢复结果丢掉。
+    // If the page cap is hit, still return the matches seen so far and mark truncation, rather than throwing away recovery results.
     if (cards.truncated === true) return { ...matched, listTruncated: true };
     return matched;
   }

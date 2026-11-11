@@ -27,7 +27,7 @@ const ISSUE_CODE = /^[a-z0-9_]{1,64}$/;
 const PATH_SEGMENT = /^[A-Za-z0-9_]{1,64}$/;
 const ENDPOINT_NAME = /^\/[A-Za-z0-9_./-]{1,200}$/;
 
-/** 路径只保留 schema 键和数组下标，丢掉可能是卡号或自由文本的片段。 */
+/** Keep only schema keys and array indexes in paths; drop segments that could be card numbers or free text. */
 function safeIssuePath(path: string): string {
   if (path === '') return '';
   return path.split('.').map(segment => (
@@ -39,7 +39,7 @@ function safeIssueCode(code: string): string {
   return ISSUE_CODE.test(code) ? code : 'invalid';
 }
 
-/** 端点名不含查询串，避免把调用方放进 query 的值再打印出来。 */
+/** Endpoint names exclude query strings so values the caller put in the query are not printed. */
 function safeEndpoint(endpoint: string): string {
   const name = endpoint.split('?')[0] ?? '';
   return ENDPOINT_NAME.test(name) ? name : '';

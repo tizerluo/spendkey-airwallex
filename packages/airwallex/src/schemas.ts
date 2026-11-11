@@ -74,10 +74,10 @@ export const createCardInputSchema = z.object({
 export type CreateCardInput = z.input<typeof createCardInputSchema>;
 export const cardStatusSchema = z.enum(['ACTIVE', 'INACTIVE', 'CLOSED']);
 export type CardStatus = z.infer<typeof cardStatusSchema>;
-// 只接受掩码卡号。数字总数不超过 12（BIN 可见掩码通常是 10 位），连续 13 位同样拒绝。
+// Only masked card numbers are accepted. At most 12 digits total (visible-BIN masks are usually 10), and 13 consecutive digits are also rejected.
 const maskedNumberSchema = z.string().refine(value => hasMaskChar(value) && !/\d{13,}/.test(value) && digitCount(value) <= 12);
 
-/** 掩码 schema 接受的值保留。其余只要像完整卡号（不论有没有掩码字符）就丢掉并打标。 */
+/** Keep values accepted by the mask schema. Anything else that looks like a full card number (with or without mask characters) is dropped and flagged. */
 function dropPanLike(value: unknown): unknown {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
   const result = { ...value } as Record<string, unknown>;
@@ -134,7 +134,7 @@ export interface ListCardsInput {
   pageSize?: number;
 }
 export interface CardsResponse { items: Card[]; unparsed: unknown[] }
-/** items 优先，其次 data、results。has_more 可以缺省。 */
+/** Prefer items, then data, then results. has_more may be omitted. */
 export const cardsPageSchema = z.object({
   items: z.array(z.unknown()).optional(),
   data: z.array(z.unknown()).optional(),
@@ -187,7 +187,7 @@ export const simulationSchema = z.preprocess(dropPanLike, withExtra({
   network_transaction_id: z.string().optional().catch(undefined),
 }));
 export type SimulationResult = z.infer<typeof simulationSchema>;
-/** REFUND、REVERSAL，以及任意 *_REVERSAL（忽略大小写）且 API 金额为正时取负。不改写 transaction_amount。 */
+/** REFUND, REVERSAL, and any *_REVERSAL (case-insensitive) become negative when the API amount is positive. transaction_amount is not rewritten. */
 function signedAmountFor(type: string | undefined, amount: Amount): Amount {
   const normalized = type?.toUpperCase();
   const reversing = normalized === 'REFUND' || normalized === 'REVERSAL' || normalized?.endsWith('_REVERSAL') === true;
