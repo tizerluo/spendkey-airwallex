@@ -151,6 +151,7 @@ function cardBody(status = 'ACTIVE'): FakeCard {
 }
 
 const cardInput: CreateCardInput = {
+  request_id: 'request_test_independent_01',
   cardholder_id: 'cardholder_test_01',
   created_by: 'Independent Test',
   form_factor: 'VIRTUAL',
@@ -317,7 +318,7 @@ describe('independent: authentication and 401 recovery', () => {
     for (const call of h.calls) expect(call.init.redirect).toBe('error');
   });
 
-  it('reuses an auto-generated request id on the 401 retry', async () => {
+  it('reuses the required caller request id on the 401 retry', async () => {
     const h = makeHarness({
       'POST /api/v1/issuing/cards/create': (_call, attempt) => attempt === 1 ? json({}, 401) : json(cardBody()),
     });
@@ -327,8 +328,8 @@ describe('independent: authentication and 401 recovery', () => {
       .map(call => bodyOf(call) as Record<string, unknown>);
     expect(bodies).toHaveLength(2);
     expect(bodies[1]?.['request_id']).toBe(bodies[0]?.['request_id']);
-    expect(String(bodies[0]?.['request_id'])).toMatch(/^[0-9a-f-]{36}$/);
-    expect(cardInput).not.toHaveProperty('request_id');
+    expect(bodies[0]?.['request_id']).toBe('request_test_independent_01');
+    expect(cardInput.request_id).toBe('request_test_independent_01');
   });
 });
 

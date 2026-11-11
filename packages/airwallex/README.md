@@ -23,8 +23,8 @@ Tokens are cached and refreshed 60 seconds before expiry. Concurrent requests
 share a login. An authenticated 401 triggers one re-login and one retry; other
 errors are not retried. Callers must pass a stable `request_id` to `createCard`,
 using `cardRequestIdFromApproval(approvalId)` to derive it deterministically
-from the approval ID. The random fallback generates an ID once per call and
-retains it on the 401 retry, but cannot prevent duplicates across separate calls.
+from the approval ID. The field is required by both the TypeScript type and
+runtime schema; it is preserved across the 401 retry and separate calls.
 Card limit and simulation inputs accept decimal strings or numbers, validated
 as positive, finite amounts with at most two decimal places and sent as JSON numbers.
 `listTransactions({ from, to, page })` sends `from_created_at`, `to_created_at`,

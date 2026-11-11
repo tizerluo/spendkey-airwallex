@@ -65,7 +65,7 @@ export const authorizationControlsInputSchema = authorizationControlsSchema.exte
   }),
 });
 export const createCardInputSchema = z.object({
-  request_id: z.string().min(1).max(50).optional(), cardholder_id: z.string().min(1),
+  request_id: z.string().min(1).max(50), cardholder_id: z.string().min(1),
   created_by: z.string().min(1), form_factor: z.literal('VIRTUAL'), is_personalized: z.boolean(),
   program: z.object({ purpose: z.string().min(1) }), nick_name: z.string(),
   authorization_controls: authorizationControlsInputSchema,

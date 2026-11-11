@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { z } from 'zod';
 import { configApiKey, isSandboxUrl } from './config.js';
 import type { AirwallexConfig } from './config.js';
@@ -176,7 +176,7 @@ export class AirwallexClient {
   createCard(input: CreateCardInput) {
     const body = createCardInputSchema.parse(input);
     return this.#request('POST', '/api/v1/issuing/cards/create', cardSchema, {
-      ...body, request_id: body.request_id ?? randomUUID(),
+      ...body,
       authorization_controls: controlsForRequest(body.authorization_controls),
     });
   }
