@@ -207,7 +207,7 @@ describe('offline e2e: curated DesignCo monthly versus annual', () => {
       },
     });
 
-    expect(body.request_id).toMatch(/^sk-[0-9a-f]{40}$/);
+    expect(body.request_id).toMatch(/^spk_[0-9a-f]{40}$/);
     expect(body.request_id.length).toBeLessThanOrEqual(50);
     expect(approvalToCardInput(approval, CARD_OPTIONS).request_id).toBe(body.request_id);
     expect(body.authorization_controls.allowed_currencies).toEqual([

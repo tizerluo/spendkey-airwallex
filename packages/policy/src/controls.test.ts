@@ -76,7 +76,7 @@ describe('approval to Airwallex controls', () => {
     const second = { ...first, approvalId: 'approval_test_other' };
     const id = approvalToCardInput(first, cardOptions).request_id;
     expect(id).toBe(cardRequestIdFromApproval(first.approvalId));
-    expect(id).toMatch(/^sk-[0-9a-f]{40}$/);
+    expect(id).toMatch(/^spk_[0-9a-f]{40}$/);
     expect(id.length).toBeLessThanOrEqual(50);
     expect(approvalToCardInput(first, cardOptions).request_id).toBe(id);
     expect(approvalToCardInput(second, cardOptions).request_id).not.toBe(id);

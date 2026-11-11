@@ -21,7 +21,7 @@ export interface AirwallexClientOptions {
 
 /** Stable card idempotency key: reuse this approval's ID across createCard calls. */
 export function cardRequestIdFromApproval(approvalId: string): string {
-  return `sk-${createHash('sha256').update(approvalId).digest('hex').slice(0, 40)}`;
+  return `spk_${createHash('sha256').update(approvalId).digest('hex').slice(0, 40)}`;
 }
 
 function controlsForRequest(input: AuthorizationControls) {
