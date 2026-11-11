@@ -1,10 +1,11 @@
 import { mkdirSync } from 'node:fs';
-import { AirwallexClient, loadAirwallexConfig } from '@sk/airwallex';
+import { loadAirwallexConfig } from '@sk/airwallex';
 import { openJsonlLedger } from '@sk/ledger';
 import { ApprovalService } from './service.js';
 import { JsonApprovalStore } from './store.js';
 import { createConsoleServer } from './http.js';
 import { recordConsoleRun, seedDesignCoRequest } from './seed.js';
+import { createAppAirwallexClient } from './airwallex-client.js';
 
 let cleanup = () => { /* startup has not opened resources */ };
 try {
@@ -17,7 +18,7 @@ try {
   const ledger = openJsonlLedger('./console-data/ledger.jsonl');
   cleanup = () => { ledger.close(); store.close(); };
   recordConsoleRun(ledger);
-  const client = new AirwallexClient(config, { fetch: globalThis.fetch });
+  const client = createAppAirwallexClient(config, globalThis.fetch);
   const service = new ApprovalService({ store, ledger, client, cardholderId });
   const secret = process.env['AIRWALLEX_WEBHOOK_SECRET'];
   const server = createConsoleServer(service, secret ? { webhookSecret: secret } : {});

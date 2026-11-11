@@ -314,7 +314,7 @@ describe('M4 demo cleanup, signal handlers, store locks and preflight', () => {
   it('writes the console mode and reserve policy before any recovery or agent events on every start', () => {
     const f = fixture(false);
     recordConsoleRun(f.ledger, new Date(at));
-    expect(f.events()[0]).toMatchObject({ kind: 'run_started', mode: 'console_sandbox', policyNotes: [expect.stringContaining('reserve floor 500.00 USD'), expect.any(String)] });
+    expect(f.events()[0]).toMatchObject({ kind: 'run_started', mode: 'console_sandbox', policyNotes: [expect.stringContaining('reserve floor = max'), expect.any(String)] });
     recordConsoleRun(f.ledger, new Date(at));
     expect(f.events()[1]).toMatchObject({ kind: 'run_started', mode: 'console_sandbox' });
   });

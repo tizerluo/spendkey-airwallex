@@ -8,6 +8,8 @@ import { renderAuditPage } from '../views/audit-page.js';
 import { renderIndexPage } from '../views/index-page.js';
 import { ApprovalService, ServiceError } from './service.js';
 import { TransactionLoop } from './transactions.js';
+import { latestRun } from '../views/run-mode.js';
+import { readAuditFile } from './audit-file.js';
 
 async function readBody(request: IncomingMessage): Promise<Buffer> {
   const parts: Buffer[] = []; let size = 0;
@@ -35,7 +37,7 @@ function respond(response: ServerResponse, status: number, body: string, html = 
   });
   response.end(body);
 }
-export function createConsoleServer(service: ApprovalService, options: { webhookSecret?: string } = {}) {
+export function createConsoleServer(service: ApprovalService, options: { webhookSecret?: string; auditFile?: string } = {}) {
   const loop = new TransactionLoop(service);
   return createServer((request, response) => {
     response.setHeader('Cache-Control', 'no-store');
@@ -65,8 +67,9 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
         respond(response, 200, renderApprovalPage(built.model, { csrfToken: built.csrfToken }), true); return;
       }
       if (method === 'GET' && path === '/audit') {
-        const events = ledger.read();
-        const model = buildAuditPageModel(events, verifyChain(events));
+        const snapshot = options.auditFile ? readAuditFile(options.auditFile) : undefined;
+        const events = snapshot?.events ?? ledger.read();
+        const model = buildAuditPageModel(events, snapshot?.verification ?? verifyChain(events));
         for (const card of model.cards) {
           const current = store.list().find(record => record.card?.cardId === card.cardId)?.card?.status;
           if (current !== undefined) card.status = current;
@@ -142,7 +145,8 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
         service.checkCsrf(owner, stringField(input, 'csrf'));
         if (cardRoute?.[2] === 'simulate') {
           const result = await loop.simulate(cardId, { amount: stringField(input, 'amount'), currency: stringField(input, 'currency'), mcc: stringField(input, 'mcc') });
-          respond(response, 200, JSON.stringify(result));
+          const offline = latestRun(ledger.read())?.mode === 'offline_emulator';
+          respond(response, 200, JSON.stringify({ ...result, ...(offline ? { label: 'emulated (offline)' } : {}) }));
         } else if (cardRoute?.[2] === 'freeze') {
           await loop.freeze(cardId, principal.kind, 'console freeze'); respond(response, 200, '{"ok":true}');
         } else {

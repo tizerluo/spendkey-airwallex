@@ -27,9 +27,19 @@ Node 22.x and pnpm 10.
 ```bash
 pnpm install --frozen-lockfile && pnpm demo:offline
 pnpm audit:verify demo-output/ledger.jsonl --expect-head <head hash printed by the demo>
+pnpm console:offline
 ```
 
 `pnpm demo:offline` needs no credentials. It writes `demo-output/ledger.jsonl`. `pnpm audit:verify` checks that file; with `--expect-head` it also detects a truncated tail.
+
+`pnpm console:offline` also needs no credentials and makes no Airwallex calls.
+It serves the human approval and audit pages at <http://127.0.0.1:8787>.
+The terminal prints the approval nonce, operator token, and ledger path. Each
+start creates a fresh `console-data-offline/run-*/` directory (gitignored),
+preserving previous recordings. Set `CONSOLE_PORT` to change the port.
+See the [offline video steps](packages/app/README.md#offline-console-video) for
+approval, emulated authorizations, freeze, reconciliation, and a file edit that
+shows “Chain BROKEN”.
 
 ## Trust boundaries
 

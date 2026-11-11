@@ -31,7 +31,8 @@ ${extra}<button type="submit">${escapeHtml(label)}</button></fieldset></form>`;
   const forms: string[] = [];
   if (cardId !== undefined) {
     if (model.status === 'issued') {
-      forms.push(form(segmentPath(['cards', cardId, 'simulate']), 'Simulate authorization',
+      forms.push(form(segmentPath(['cards', cardId, 'simulate']), model.runMode === 'offline_emulator'
+        ? 'Simulate authorization — emulated (offline)' : 'Simulate authorization',
         '<label>Amount<input name="amount" required></label><label>Currency<input name="currency" required pattern="[A-Z]{3}"></label><label>Merchant category<input name="mcc" required pattern="[0-9]{4}"></label>'));
       forms.push(form('/reconcile', 'Reconcile', `<input type="hidden" name="cardId" value="${escapeHtml(cardId)}">`));
     }
