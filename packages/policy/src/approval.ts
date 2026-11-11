@@ -11,6 +11,7 @@ export interface ApprovalRequest {
   vendor: string;
   product: string;
   plan: Candidate['plan'];
+  rail: Candidate['rail'];
   currency: string;
   amountMinor: MinorAmount;
   interval: 'PER_TRANSACTION' | 'MONTHLY' | 'ALL_TIME';
@@ -29,7 +30,7 @@ export interface Approval {
   approvedBy: { kind: 'human'; id: string };
   approvedAt: string;
 }
-export type ApprovalErrorCode = 'self_approval_forbidden' | 'terms_mismatch' | 'approval_expired' | 'mcc_required';
+export type ApprovalErrorCode = 'self_approval_forbidden' | 'terms_mismatch' | 'approval_expired' | 'mcc_required' | 'rail_not_card';
 export class ApprovalError extends Error {
   constructor(readonly code: ApprovalErrorCode) {
     super(code);
@@ -40,6 +41,7 @@ export class ApprovalError extends Error {
 export const approvalRequestSchema = z.object({
   approvalRequestId: z.string().min(1), offerId: z.string().min(1), vendor: z.string().min(1), product: z.string().min(1),
   plan: z.enum(['monthly', 'annual', 'usage', 'one_time']), currency: currencySchema,
+  rail: z.enum(['card', 'x402']),
   amountMinor: minorAmountSchema.positive(), interval: z.enum(['PER_TRANSACTION', 'MONTHLY', 'ALL_TIME']),
   allowedTransactionCount: z.enum(['SINGLE', 'MULTIPLE']), merchantCategoryCode: mccSchema.optional(),
   commitmentMonths: z.number().int().nonnegative().safe(), priceStatus: z.enum(['verified', 'price_unverified']),
@@ -53,10 +55,11 @@ export interface ApprovalRequestOptions {
 }
 
 export function createApprovalRequest(candidate: Candidate, options: ApprovalRequestOptions): ApprovalRequest {
+  if (candidate.rail !== 'card') throw new ApprovalError('rail_not_card');
   candidateSchema.parse(candidate);
   const request: ApprovalRequest = {
     ...options, offerId: candidate.offerId, vendor: candidate.vendor, product: candidate.product,
-    plan: candidate.plan, currency: candidate.currency, amountMinor: candidate.perChargeMinor,
+    plan: candidate.plan, rail: candidate.rail, currency: candidate.currency, amountMinor: candidate.perChargeMinor,
     // Recurring plans cap the monthly aggregate at the approved monthly bill.
     interval: candidate.plan === 'monthly' || candidate.plan === 'usage' ? 'MONTHLY' : 'PER_TRANSACTION',
     allowedTransactionCount: candidate.plan === 'annual' || candidate.plan === 'one_time' ? 'SINGLE' : 'MULTIPLE',
@@ -71,7 +74,7 @@ export function createApprovalRequest(candidate: Candidate, options: ApprovalReq
 export function termsHash(request: ApprovalRequest): string {
   approvalRequestSchema.parse(request);
   return sha256Hex(canonicalize({
-    offerId: request.offerId, vendor: request.vendor, plan: request.plan, currency: request.currency,
+    offerId: request.offerId, vendor: request.vendor, plan: request.plan, rail: request.rail, currency: request.currency,
     amountMinor: request.amountMinor, interval: request.interval, allowedTransactionCount: request.allowedTransactionCount,
     merchantCategoryCode: request.merchantCategoryCode, commitmentMonths: request.commitmentMonths,
     expiresAt: request.expiresAt,

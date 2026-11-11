@@ -6,6 +6,22 @@ import { z } from 'zod';
  */
 export type MinorAmount = number;
 
+export interface Candidate {
+  offerId: string; vendor: string; product: string; sourceId: 'curated' | 'x402-snapshot';
+  rail: 'card' | 'x402';
+  plan: 'monthly' | 'annual' | 'usage' | 'one_time';
+  currency: string;
+  merchantCategoryCode?: string;
+  commitmentMonths: number;
+  priceStatus: 'verified' | 'price_unverified';
+  availability: 'available' | 'region_unavailable';
+  upfrontMinor: MinorAmount;
+  perChargeMinor: MinorAmount;
+  horizonCost: { lowMinor: MinorAmount; highMinor: MinorAmount };
+  monthlyRunRateMinor: { lowMinor: MinorAmount; highMinor: MinorAmount };
+  notes: string[];
+}
+
 export const MinorAmountSchema = z
   .number()
   .int()
@@ -28,6 +44,7 @@ export const CandidateSchema = z
     vendor: z.string().min(1),
     product: z.string().min(1),
     sourceId: z.enum(['curated', 'x402-snapshot']),
+    rail: z.enum(['card', 'x402']),
     plan: z.enum(['monthly', 'annual', 'usage', 'one_time']),
     currency: z.string().regex(/^[A-Z]{3}$/),
     merchantCategoryCode: z.string().regex(/^\d{4}$/).optional(),
@@ -43,9 +60,11 @@ export const CandidateSchema = z
   .strict()
   .refine((candidate) => candidate.availability === 'available', {
     message: 'region_unavailable offers are not candidates',
+  })
+  .transform((candidate): Candidate => {
+    const { merchantCategoryCode, ...rest } = candidate;
+    return { ...rest, ...(merchantCategoryCode === undefined ? {} : { merchantCategoryCode }) };
   });
-
-export type Candidate = z.infer<typeof CandidateSchema>;
 
 const IntegerRangeSchema = z
   .object({

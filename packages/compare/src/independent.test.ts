@@ -21,6 +21,7 @@ function baseOffer(overrides: Partial<Offer> = {}): Offer {
   return {
     id: 'offer_independent_monthly',
     sourceId: 'curated',
+    rail: 'card',
     vendor: 'Independent Test Vendor',
     product: 'Independent Test Product',
     plan: 'monthly',
@@ -385,6 +386,7 @@ describe('independent: candidate schema boundaries', () => {
     const noMcc = toCandidate(baseOffer(), { horizonMonths: 12 });
     delete noMcc.merchantCategoryCode;
     expect(CandidateSchema.safeParse(noMcc).success).toBe(true);
+    expect(CandidateSchema.parse({ ...noMcc, merchantCategoryCode: undefined })).not.toHaveProperty('merchantCategoryCode');
   });
 
   it('refuses a currency that is not three uppercase letters', () => {

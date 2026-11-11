@@ -4,6 +4,7 @@ import type { Candidate, PolicyContext } from './index.js';
 export function candidate(overrides: Partial<Candidate> = {}): Candidate {
   return {
     offerId: 'offer_test_monthly', vendor: 'Test Vendor', product: 'Test Product', sourceId: 'curated',
+    rail: 'card',
     plan: 'monthly', currency: 'USD', merchantCategoryCode: '5734', commitmentMonths: 1,
     priceStatus: 'verified', availability: 'available', upfrontMinor: 5_000, perChargeMinor: 5_000,
     horizonCost: { lowMinor: 60_000, highMinor: 60_000 },

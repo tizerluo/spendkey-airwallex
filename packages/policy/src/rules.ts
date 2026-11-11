@@ -3,7 +3,7 @@ import { candidateSchema } from './types.js';
 import type { Candidate, PolicyContext } from './types.js';
 
 export interface RuleResult {
-  rule: 'reserve_floor' | 'window_budget' | 'commitment_cap' | 'region';
+  rule: 'reserve_floor' | 'window_budget' | 'commitment_cap' | 'region' | 'rail';
   pass: boolean;
   code: string;
   detail: string;

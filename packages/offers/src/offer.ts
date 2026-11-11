@@ -6,6 +6,7 @@ export const CurrencySchema = z.string().regex(/^[A-Z]{3}$/);
 export const CountryCodeSchema = z.string().regex(/^[A-Z]{2}$/);
 
 export const OfferSourceIdSchema = z.enum(['curated', 'x402-snapshot']);
+export const OfferRailSchema = z.enum(['card', 'x402']);
 export const OfferPlanSchema = z.enum(['monthly', 'annual', 'usage', 'one_time']);
 export const PriceUnitSchema = z.enum(['per_month', 'per_year', 'per_call', 'per_1k_units', 'one_time']);
 export const PriceStatusSchema = z.enum(['verified', 'price_unverified']);
@@ -31,6 +32,7 @@ export const OfferRegionsSchema = z.object({
 export const OfferSchema = z.object({
   id: z.string().min(1),
   sourceId: OfferSourceIdSchema,
+  rail: OfferRailSchema.optional(),
   vendor: z.string().min(1),
   product: z.string().min(1),
   plan: OfferPlanSchema,
@@ -47,7 +49,12 @@ export const OfferSchema = z.object({
   sourceUrl: z.string().url().regex(/^https:\/\//i).optional(),
   capturedAt: z.string().datetime({ offset: true }),
   notes: z.string().min(1).optional(),
-}).strict();
+}).strict().transform(offer => ({
+  ...offer,
+  rail: offer.rail ?? (offer.sourceId === 'x402-snapshot' ? 'x402' : 'card'),
+})).refine(offer => offer.sourceId !== 'x402-snapshot' || offer.rail === 'x402', {
+  message: 'x402 snapshot offers require the x402 rail',
+});
 
 export type OfferSourceId = z.infer<typeof OfferSourceIdSchema>;
 export type OfferPlan = z.infer<typeof OfferPlanSchema>;

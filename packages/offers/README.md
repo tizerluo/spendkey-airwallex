@@ -9,6 +9,10 @@ and a price-confidence status. Units are deliberately **not normalised or
 converted** (`per_month`, `per_year`, `per_call`, `per_1k_units`, `one_time`);
 comparison is a later milestone.
 
+Every parsed offer has `rail: 'card' | 'x402'`. When omitted in source data,
+`OfferSchema` derives `card` for curated offers and `x402` for x402 snapshots.
+An x402 snapshot cannot override its rail to `card`.
+
 ## Sources
 
 ### `createCuratedSource(data?)`
@@ -31,7 +35,7 @@ Two source-level rules matter:
 
 Reads `fixtures/x402-snapshot.json`: 5-8 captured pay-per-call API listings on
 Celo. Each entry becomes an offer with `plan: "usage"`, `unit: "per_call"`,
-`currency: "USD"`, `sourceId: "x402-snapshot"`, and
+`currency: "USD"`, `sourceId: "x402-snapshot"`, `rail: "x402"`, and
 `priceStatus: "price_unverified"`. The prices are USDC per call and are noted as
 such; the USD amount is a placeholder. This source is strictly read-only: it
 never fetches a resource and never makes a payment.

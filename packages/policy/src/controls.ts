@@ -16,6 +16,7 @@ export interface CardInputOptions { cardholderId: string; createdBy: string; nic
 
 export function approvalToCardInput(approval: Approval, options: CardInputOptions): CreateCardInput {
   const request = approval.request;
+  if (request.rail !== 'card') throw new ApprovalError('rail_not_card');
   if (!mccSchema.safeParse(request.merchantCategoryCode).success) throw new ApprovalError('mcc_required');
   if (approval.approvedBy.kind !== 'human') throw new ApprovalError('self_approval_forbidden');
   if (approval.termsHash !== termsHash(request)) throw new ApprovalError('terms_mismatch');

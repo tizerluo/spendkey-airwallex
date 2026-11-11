@@ -26,7 +26,7 @@ describe('approval requests', () => {
     const result = createApprovalRequest(candidate({ plan, upfrontMinor: 0, perChargeMinor: 1234 }), times);
     expect(result).toEqual({
       ...times, offerId: 'offer_test_monthly', vendor: 'Test Vendor', product: 'Test Product', plan,
-      currency: 'USD', amountMinor: 1234, interval, allowedTransactionCount,
+      rail: 'card', currency: 'USD', amountMinor: 1234, interval, allowedTransactionCount,
       merchantCategoryCode: '5734', commitmentMonths: 1, priceStatus: 'verified',
     });
   });
@@ -43,7 +43,7 @@ describe('termsHash', () => {
   it('is lowercase SHA-256 over exactly the binding fields using core canonicalization', () => {
     const input = request();
     const binding = {
-      offerId: input.offerId, vendor: input.vendor, plan: input.plan, currency: input.currency,
+      offerId: input.offerId, vendor: input.vendor, plan: input.plan, rail: input.rail, currency: input.currency,
       amountMinor: input.amountMinor, interval: input.interval, allowedTransactionCount: input.allowedTransactionCount,
       merchantCategoryCode: input.merchantCategoryCode, commitmentMonths: input.commitmentMonths, expiresAt: input.expiresAt,
     };
@@ -55,7 +55,7 @@ describe('termsHash', () => {
       priceStatus: 'price_unverified', createdAt: '2029-12-31T23:00:00Z' })).toBe(termsHash(input));
   });
   it.each([
-    { offerId: 'offer_test_other' }, { vendor: 'Other Test Vendor' }, { plan: 'annual' }, { currency: 'EUR' },
+    { offerId: 'offer_test_other' }, { vendor: 'Other Test Vendor' }, { plan: 'annual' }, { currency: 'EUR' }, { rail: 'x402' },
     { amountMinor: 5001 }, { interval: 'PER_TRANSACTION' }, { interval: 'ALL_TIME' }, { allowedTransactionCount: 'SINGLE' },
     { merchantCategoryCode: '5817' }, { commitmentMonths: 12 }, { expiresAt: '2030-01-01T02:00:00Z' },
   ] satisfies Partial<ApprovalRequest>[])('changes when a binding field changes: %j', change => {

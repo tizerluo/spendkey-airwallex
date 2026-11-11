@@ -4,6 +4,16 @@ import { OfferListSchema, OfferSchema } from './offer.js';
 import { defaultSnapshot, X402SnapshotSchema } from './x402-snapshot.js';
 
 describe('offer fixtures', () => {
+  it('derives the rail from legacy source data and refuses card-labelled x402 snapshots', () => {
+    const [sample] = readFixture('curated-offers.json', OfferListSchema);
+    if (!sample) throw new Error('missing synthetic curated offer');
+    const legacy: Omit<typeof sample, 'rail'> & { rail?: 'card' | 'x402' } = { ...sample };
+    delete legacy.rail;
+    expect(OfferSchema.parse(legacy).rail).toBe('card');
+    expect(OfferSchema.parse({ ...legacy, sourceId: 'x402-snapshot' }).rail).toBe('x402');
+    expect(OfferSchema.safeParse({ ...legacy, sourceId: 'x402-snapshot', rail: 'card' }).success).toBe(false);
+    expect(OfferSchema.safeParse({ ...legacy, rail: 'wire' }).success).toBe(false);
+  });
   it('validates every curated offer against OfferSchema', () => {
     const offers = readFixture('curated-offers.json', OfferListSchema);
     expect(offers).toHaveLength(6);

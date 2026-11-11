@@ -165,6 +165,7 @@ function buildCandidate(offer: Offer, usage: UsageProfile): Candidate {
     vendor: offer.vendor,
     product: offer.product,
     sourceId: offer.sourceId,
+    rail: offer.rail,
     plan: offer.plan,
     currency: offer.price.currency,
     ...(offer.merchantCategoryCode === undefined

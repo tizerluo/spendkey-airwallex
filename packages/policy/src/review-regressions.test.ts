@@ -7,7 +7,7 @@ import { candidate, context } from './test-fixtures.js';
 
 const usageOffer = {
   id: 'offer_test_usage', vendor: 'Test Vendor', product: 'Test Usage Product',
-  sourceId: 'x402-snapshot', plan: 'usage',
+  sourceId: 'curated', rail: 'card', plan: 'usage',
   price: { amount: '0.001', currency: 'USD', unit: 'per_call' },
   category: 'test-api', cancellation: 'Cancel anytime', capturedAt: '2030-01-01T00:00:00Z',
   commitmentMonths: 0, priceStatus: 'price_unverified', availability: 'available',

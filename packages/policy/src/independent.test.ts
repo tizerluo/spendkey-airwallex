@@ -54,7 +54,7 @@ const BINDING_CHANGES: BindingChange[] = [
     label: 'amountMinor',
     change: (request) => ({ ...request, amountMinor: request.amountMinor + 1 }),
   },
-  { label: 'interval', change: (request) => ({ ...request, interval: 'MONTHLY' }) },
+  { label: 'interval', change: (request) => ({ ...request, interval: 'PER_TRANSACTION' }) },
   {
     label: 'allowedTransactionCount',
     change: (request) => ({ ...request, allowedTransactionCount: 'SINGLE' }),
@@ -203,7 +203,7 @@ describe('independent: reserve_floor boundaries', () => {
     );
   });
 
-  it('ignores obligations outside the horizon and in other currencies', () => {
+  it('counts overdue obligations while ignoring future and foreign obligations', () => {
     const ctx = context({
       balances: [{ currency: 'USD', available_amount: '600.00' }],
       knownObligations: [
@@ -213,7 +213,12 @@ describe('independent: reserve_floor boundaries', () => {
       ],
       reserveFloorMinor: { USD: 55000 },
     });
-    expect(reserveFloor(candidate({ upfrontMinor: 5000 }), ctx).code).toBe('reserve_ok');
+    expect(reserveFloor(candidate({ upfrontMinor: 5000 }), ctx)).toMatchObject({
+      pass: false, code: 'reserve_breach',
+    });
+    expect(reserveFloor(candidate({ upfrontMinor: 5000 }), {
+      ...ctx, knownObligations: ctx.knownObligations.filter(obligation => obligation.dueInDays !== -1),
+    }).code).toBe('reserve_ok');
   });
 
   it('passes at a zero floor only when available covers the upfront amount', () => {
@@ -241,7 +246,7 @@ describe('independent: reserve_floor boundaries', () => {
     expect(reserveFloor(candidate(), context({ reserveFloorMinor: {} })).code).toBe(
       'reserve_unknown_currency',
     );
-    expect(() =>
+    expect(
       reserveFloor(
         candidate(),
         context({
@@ -251,7 +256,7 @@ describe('independent: reserve_floor boundaries', () => {
           ],
         }),
       ),
-    ).toThrow('ambiguous_currency_balance');
+    ).toMatchObject({ pass: false, code: 'reserve_ambiguous_balance' });
   });
 
   it('rejects more than two decimal places in a balance instead of rounding it', () => {
@@ -285,7 +290,7 @@ describe('independent: window_budget boundaries', () => {
   it.each([
     { spent: 0, charge: 10000, pass: true },
     { spent: 9999, charge: 1, pass: true },
-    { spent: 10000, charge: 0, pass: true },
+    { spent: 10000, charge: 0, pass: false },
     { spent: 10000, charge: 1, pass: false },
     { spent: 9999, charge: 2, pass: false },
     { spent: 10001, charge: 0, pass: false },
@@ -295,7 +300,7 @@ describe('independent: window_budget boundaries', () => {
       context({ spentInWindowMinor: spent, windowBudgetMinor: 10000 }),
     );
     expect(result.pass).toBe(pass);
-    expect(result.code).toBe(pass ? 'budget_ok' : 'budget_exceeded');
+    expect(result.code).toBe(charge === 0 ? 'zero_charge_unknown_cost' : pass ? 'budget_ok' : 'budget_exceeded');
   });
 
   it('ignores the upfront cost and uses only the per-charge amount', () => {
@@ -543,38 +548,28 @@ describe('independent: decidePurchase ranking and refusal', () => {
       }),
     );
     expect(decision.action).toBe('refuse');
-    expect(decision.reasons).toEqual(['budget_currency_mismatch']);
+    expect(decision.reasons).toEqual(['currency_not_budgeted']);
+    expect(decision).not.toHaveProperty('chosen');
+    expect(decision.ranked[0]).toMatchObject({ passed: false, results: [{ code: 'currency_not_budgeted', pass: false }] });
   });
 
-  it('asks with price and MCC warnings without changing the chosen terms', () => {
-    const x402 = candidate({
-      sourceId: 'x402-snapshot',
+  it('refuses zero-charge card usage even with price and MCC warnings', () => {
+    const usage = candidate({
       plan: 'usage',
       priceStatus: 'price_unverified',
       upfrontMinor: 0,
       perChargeMinor: 0,
     });
-    delete x402.merchantCategoryCode;
+    delete usage.merchantCategoryCode;
 
-    expect(decidePurchase([x402], context())).toMatchObject({
-      action: 'ask',
-      chosen: x402,
-      reasons: [
-        'human_approval_required',
-        'price_unverified',
-        'mcc_required_at_approval',
-      ],
-    });
+    const decision = decidePurchase([usage], context());
+    expect(decision).toMatchObject({ action: 'refuse', reasons: ['zero_charge_unknown_cost'] });
+    expect(decision).not.toHaveProperty('chosen');
   });
 
-  it.fails('does not rank an unknown usage range as a free purchase', () => {
-    // BUG: compareOffers emits a zero cost range with a "usage unknown" note when
-    // the usage profile is missing. decidePurchase passes that candidate and ranks
-    // it ahead of a known-cost one, so a human is asked to approve an unpriceable
-    // $0 card instead of the priced alternative.
+  it('does not rank an unknown usage range as a free purchase', () => {
     const unknown = candidate({
       offerId: 'offer_usage_unknown',
-      sourceId: 'x402-snapshot',
       plan: 'usage',
       priceStatus: 'price_unverified',
       upfrontMinor: 0,
@@ -591,7 +586,10 @@ describe('independent: decidePurchase ranking and refusal', () => {
     });
 
     const decision = decidePurchase([unknown, known], context());
-    expect(decision.chosen?.offerId).not.toBe('offer_usage_unknown');
+    expect(decision.chosen?.offerId).toBe('offer_known_cost');
+    expect(decision.ranked.find(entry => entry.candidate === unknown)).toMatchObject({
+      passed: false, results: expect.arrayContaining([expect.objectContaining({ code: 'zero_charge_unknown_cost', pass: false })]),
+    });
   });
 });
 
@@ -608,7 +606,7 @@ describe('independent: approval request amount and lifetime', () => {
         TIMES,
       );
       expect(request.amountMinor).toBe(1234);
-      expect(request.interval).toBe('PER_TRANSACTION');
+      expect(request.interval).toBe(plan === 'monthly' || plan === 'usage' ? 'MONTHLY' : 'PER_TRANSACTION');
     }
   });
 
@@ -860,7 +858,7 @@ describe('independent: approval-to-card controls', () => {
         limits: [
           {
             amount: Number(minorToDecimal(amount)),
-            interval: 'PER_TRANSACTION',
+            interval: plan === 'monthly' || plan === 'usage' ? 'MONTHLY' : 'PER_TRANSACTION',
           },
         ],
       },
@@ -943,10 +941,10 @@ describe('independent: approval-to-card controls', () => {
   });
 
   it('rejects a zero or unrepresentable limit and accepts one cent', () => {
-    const zero = approved({ perChargeMinor: 0 });
-    expect(() => approvalToCardInput(zero, CARD_OPTIONS)).toThrow(
-      'unrepresentable_card_amount',
-    );
+    expect(() => approved({ perChargeMinor: 0 })).toThrow();
+    const zero = approved();
+    zero.request.amountMinor = 0;
+    expect(() => approvalToCardInput(zero, CARD_OPTIONS)).toThrow();
 
     const maximum = approved({ perChargeMinor: MAX_SAFE });
     expect(() => approvalToCardInput(maximum, CARD_OPTIONS)).toThrow(
@@ -1008,6 +1006,7 @@ describe('independent: x402 candidate without MCC', () => {
     const usage = candidate({
       offerId: 'x402:https://api.weather.example.com/weather/current',
       sourceId: 'x402-snapshot',
+      rail: 'x402',
       plan: 'usage',
       priceStatus: 'price_unverified',
       upfrontMinor: 0,
@@ -1020,48 +1019,26 @@ describe('independent: x402 candidate without MCC', () => {
     return usage;
   }
 
-  it('asks with an explicit MCC warning', () => {
+  it('refuses the x402 rail even when its cost is known', () => {
     const usage = x402Candidate();
     expect(decidePurchase([usage], context())).toMatchObject({
-      action: 'ask',
-      chosen: usage,
-      reasons: [
-        'human_approval_required',
-        'price_unverified',
-        'mcc_required_at_approval',
-      ],
+      action: 'refuse',
+      reasons: ['rail_not_card'],
+      ranked: [{ candidate: usage, passed: false, results: [{ code: 'rail_not_card', pass: false }] }],
     });
   });
 
-  it('requires a human MCC before approval', () => {
-    const request = createApprovalRequest(x402Candidate(), TIMES);
-    expect(request).not.toHaveProperty('merchantCategoryCode');
+  it('refuses an x402 approval request before human MCC entry', () => {
     expectApprovalCode(
-      () =>
-        approve(request, {
-          approver: HUMAN,
-          presentedTermsHash: termsHash(request),
-          now: '2030-01-01T00:30:00Z',
-        }),
-      'mcc_required',
+      () => createApprovalRequest(x402Candidate(), TIMES),
+      'rail_not_card',
     );
   });
 
-  it('fills the human MCC and maps it to the card controls', () => {
-    const request = createApprovalRequest(x402Candidate(), TIMES);
-    const presented = termsHash(request);
-    const approval = approve(request, {
-      approver: HUMAN,
-      presentedTermsHash: presented,
-      merchantCategoryCode: '5817',
-      now: '2030-01-01T00:30:00Z',
-    });
-
-    const body = approvalToCardInput(approval, CARD_OPTIONS);
-    expect(body.authorization_controls.allowed_merchant_categories).toEqual(['5817']);
-    expect(body.authorization_controls.allowed_transaction_count).toBe('MULTIPLE');
-    expect(
-      body.authorization_controls.transaction_limits.limits[0]?.amount,
-    ).toBe(2);
+  it('refuses an x402 card input even with human approval, matching terms and MCC', () => {
+    const approval = approved({ merchantCategoryCode: '5817' });
+    approval.request.rail = 'x402';
+    approval.termsHash = termsHash(approval.request);
+    expectApprovalCode(() => approvalToCardInput(approval, CARD_OPTIONS), 'rail_not_card');
   });
 });

@@ -126,6 +126,7 @@ describe('toCandidate: usage plans', () => {
 
     expect(candidate).toMatchObject({
       sourceId: 'x402-snapshot',
+      rail: 'x402',
       plan: 'usage',
       currency: 'USD',
       commitmentMonths: 0,

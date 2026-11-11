@@ -53,8 +53,8 @@ Success codes are `reserve_ok`, `budget_ok`, `commitment_ok`, and `region_ok`.
 Callers must keep the balance/obligation snapshot and spending window current.
 The package does not reserve funds or serialize concurrent purchase attempts.
 
-`decidePurchase(candidates, ctx)` ranks only candidates in `budgetCurrency`.
-Other currencies are ineligible and appear after the ranking in input order,
+`decidePurchase(candidates, ctx)` ranks only `rail: 'card'` candidates in
+`budgetCurrency`. Other card currencies are ineligible and appear after the ranking in input order,
 with the failing reason `currency_not_budgeted`; no FX comparison takes place.
 This reason also appears in the decision reasons when such candidates exist.
 Within the budget currency, it puts passing candidates first, then sorts by
@@ -63,6 +63,9 @@ for remaining ties). It asks for the cheapest passing candidate, or refuses
 with every distinct failure code. Empty input refuses with empty reasons.
 Unverified prices remain eligible, with `price_unverified` in reasons. Missing
 MCC remains eligible, with `mcc_required_at_approval` in reasons.
+Non-card candidates appear after all card rows in input order, with a failing
+`rail` result and code `rail_not_card`. They remain visible for comparison and
+can never be chosen; the decision reasons also report their rail exclusion.
 
 The demo is deliberate: with 1000.00 USD available, 100.00 in obligations, and
 a 500.00 reserve floor, a 480.00 annual purchase fails reserves even though it
@@ -121,7 +124,7 @@ Monthly card intervals do not coordinate several cards or arbitrary application
 budget windows; callers must still keep window spending current.
 
 `termsHash` reuses `@sr/core` audit canonical JSON and SHA-256. Its lowercase hex
-digest binds exactly `offerId`, `vendor`, `plan`, `currency`, `amountMinor`,
+digest binds exactly `offerId`, `vendor`, `plan`, `rail`, `currency`, `amountMinor`,
 `interval`, `allowedTransactionCount`, `merchantCategoryCode`,
 `commitmentMonths`, and `expiresAt`. Undefined MCC is omitted canonically. Key
 order is irrelevant. Product/display metadata, IDs, creation time and price
@@ -129,7 +132,10 @@ status are outside this specified hash contract.
 
 `approve` requires a human, matching presented hash and an unexpired request
 (expiration is exclusive). `ApprovalError.code` is `self_approval_forbidden`,
-`terms_mismatch`, `approval_expired`, or `mcc_required`. A human must explicitly
+`terms_mismatch`, `approval_expired`, `mcc_required`, or `rail_not_card`. Both
+`createApprovalRequest` and `approvalToCardInput` reject non-card rails, even
+when an MCC is present. Approval requests require the rail and bind it in the
+terms hash. A human must explicitly
 supply a four-digit MCC if absent; approval records the hash of those completed
 terms, which differs from the original MCC-free hash. The original request is
 not mutated. `createApprovalRequest` rejects zero `amountMinor` at validation,

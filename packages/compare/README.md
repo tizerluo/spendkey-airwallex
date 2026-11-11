@@ -47,6 +47,7 @@ Each candidate carries:
 
 | Field | Meaning |
 | --- | --- |
+| `rail` | Payment rail carried from the offer: `card` or `x402` |
 | `upfrontMinor` | Cash leaving at purchase time |
 | `perChargeMinor` | Largest single expected card charge |
 | `horizonCost` | Total cost over `horizonMonths`, as a range |
@@ -89,6 +90,8 @@ treated as the total plan price.
   `price_unverified: amount shown, no savings claim`.
 - Mixed currencies are not converted. Every candidate gets a `mixed currencies`
   note and the caller must compare within a currency.
+- x402 candidates remain visible for comparison, but policy refuses them on
+  the card rail with `rail_not_card`.
 
 ## Schemas
 

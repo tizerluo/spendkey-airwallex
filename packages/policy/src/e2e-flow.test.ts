@@ -12,7 +12,6 @@ import {
   minorToDecimal,
   termsHash,
   type Approval,
-  type Candidate as PolicyCandidate,
   type CardInputOptions,
   type PolicyContext,
 } from './index.js';
@@ -35,7 +34,7 @@ interface CompareModule {
 }
 
 interface OffersModule {
-  createCuratedSource(): {
+  createCuratedSource(data?: readonly Offer[]): {
     listOffers(query: {
       intent: string;
       billingCountry?: string;
@@ -138,11 +137,8 @@ describe('offline e2e: curated DesignCo monthly versus annual', () => {
     });
     expect(annual.horizonCost.highMinor).toBeLessThan(monthly.horizonCost.highMinor);
 
-    // BUG: @sk/compare infers `merchantCategoryCode?: string | undefined`, which is
-    // not assignable to @sk/policy's `merchantCategoryCode?: string` under
-    // exactOptionalPropertyTypes, even though the runtime shapes match.
     const decision = decidePurchase(
-      compared.candidates as PolicyCandidate[],
+      compared.candidates,
       flowContext('660.00'),
     );
     expect(decision.action).toBe('ask');
@@ -171,9 +167,10 @@ describe('offline e2e: curated DesignCo monthly versus annual', () => {
       vendor: 'DesignCo',
       product: 'Team plan',
       plan: 'monthly',
+      rail: 'card',
       currency: 'USD',
       amountMinor: 6000,
-      interval: 'PER_TRANSACTION',
+      interval: 'MONTHLY',
       allowedTransactionCount: 'MULTIPLE',
       merchantCategoryCode: '7372',
       commitmentMonths: 0,
@@ -205,7 +202,7 @@ describe('offline e2e: curated DesignCo monthly versus annual', () => {
         allowed_merchant_categories: ['7372'],
         transaction_limits: {
           currency: 'USD',
-          limits: [{ amount: 60, interval: 'PER_TRANSACTION' }],
+          limits: [{ amount: 60, interval: 'MONTHLY' }],
         },
       },
     });
@@ -236,7 +233,7 @@ describe('offline e2e: curated DesignCo monthly versus annual', () => {
     const compared = compare.compareOffers(offers, DESIGN_USAGE);
 
     const decision = decidePurchase(
-      compared.candidates as PolicyCandidate[],
+      compared.candidates,
       flowContext('659.99'),
     );
     expect(decision.action).toBe('refuse');
@@ -257,14 +254,14 @@ describe('offline e2e: curated DesignCo monthly versus annual', () => {
       .listOffers({ intent: 'designco', billingCountry: 'US', cardCountry: 'US' });
     const compared = compare.compareOffers(offers, DESIGN_USAGE);
     const decision = decidePurchase(
-      compared.candidates as PolicyCandidate[],
+      compared.candidates,
       flowContext('660.00'),
     );
     const chosen = decision.chosen;
     if (!chosen) throw new Error('expected a chosen monthly candidate');
 
     const annualRequest = createApprovalRequest(
-      byPlan(compared.candidates, 'annual') as PolicyCandidate,
+      byPlan(compared.candidates, 'annual'),
       TIMES,
     );
     const monthlyRequest = createApprovalRequest(chosen, TIMES);
@@ -298,7 +295,7 @@ describe('offline e2e: curated DesignCo monthly versus annual', () => {
     expect(body.authorization_controls.transaction_limits.limits[0]?.amount).toBe(60);
   });
 
-  it('runs an x402 offer without MCC through human MCC approval into card controls', async () => {
+  it('refuses an x402 offer without MCC at the card rail boundary', async () => {
     const { compare, offers: offerSource } = await loadSources();
     const offers = await offerSource
       .createX402SnapshotSource()
@@ -315,6 +312,7 @@ describe('offline e2e: curated DesignCo monthly versus annual', () => {
     expect(usage).toMatchObject({
       plan: 'usage',
       sourceId: 'x402-snapshot',
+      rail: 'x402',
       currency: 'USD',
       priceStatus: 'price_unverified',
       upfrontMinor: 0,
@@ -324,7 +322,31 @@ describe('offline e2e: curated DesignCo monthly versus annual', () => {
     });
     expect(usage.merchantCategoryCode).toBeUndefined();
 
-    const decision = decidePurchase([usage as PolicyCandidate], flowContext('660.00'));
+    const decision = decidePurchase([usage], flowContext('660.00'));
+    expect(decision).toMatchObject({ action: 'refuse', reasons: ['rail_not_card'] });
+    expect(decision).not.toHaveProperty('chosen');
+    expect(decision.ranked).toMatchObject([
+      { candidate: usage, passed: false, results: [{ pass: false, code: 'rail_not_card' }] },
+    ]);
+    expectApprovalCode(() => createApprovalRequest(usage, TIMES), 'rail_not_card');
+  });
+
+  it('requires explicit human MCC entry for a curated card offer without MCC', async () => {
+    const { compare, offers: offerSource } = await loadSources();
+    const synthetic: Offer = {
+      id: 'curated_test_usage_no_mcc', sourceId: 'curated', rail: 'card',
+      vendor: 'Test Usage Vendor', product: 'Test Usage API', plan: 'usage', category: 'test-api',
+      price: { amount: '0.001', currency: 'USD', unit: 'per_call' },
+      commitmentMonths: 0, cancellation: 'Pay per call', priceStatus: 'price_unverified',
+      availability: 'available', capturedAt: '2030-01-01T00:00:00Z',
+    };
+    const offers = await offerSource.createCuratedSource([synthetic]).listOffers({ intent: 'test usage' });
+    const { candidates } = compare.compareOffers(offers, {
+      horizonMonths: 12, callsPerMonth: { low: 1000, high: 2000 },
+    });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ sourceId: 'curated', rail: 'card', perChargeMinor: 200 });
+    const decision = decidePurchase(candidates, flowContext('660.00'));
     expect(decision.action).toBe('ask');
     expect(decision.reasons).toEqual([
       'human_approval_required',
@@ -359,7 +381,7 @@ describe('offline e2e: curated DesignCo monthly versus annual', () => {
       allowed_merchant_categories: ['5817'],
       transaction_limits: {
         currency: 'USD',
-        limits: [{ amount: 2, interval: 'PER_TRANSACTION' }],
+        limits: [{ amount: 2, interval: 'MONTHLY' }],
       },
     });
     expect(body.authorization_controls.allowed_currencies).toEqual([

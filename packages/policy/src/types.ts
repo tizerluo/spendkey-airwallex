@@ -5,9 +5,10 @@ import type { MinorAmount } from './money.js';
 // Shared M2 contract: structural, with no runtime dependency on @sk/compare.
 export interface Candidate {
   offerId: string; vendor: string; product: string; sourceId: 'curated' | 'x402-snapshot';
+  rail: 'card' | 'x402';
   plan: 'monthly' | 'annual' | 'usage' | 'one_time';
   currency: string;
-  merchantCategoryCode?: string | undefined;
+  merchantCategoryCode?: string;
   commitmentMonths: number;
   priceStatus: 'verified' | 'price_unverified';
   availability: 'available' | 'region_unavailable';
@@ -31,6 +32,7 @@ const rangeSchema = z.object({ lowMinor: minorAmountSchema, highMinor: minorAmou
 export const candidateSchema = z.object({
   offerId: z.string().min(1), vendor: z.string().min(1), product: z.string().min(1),
   sourceId: z.enum(['curated', 'x402-snapshot']), plan: z.enum(['monthly', 'annual', 'usage', 'one_time']),
+  rail: z.enum(['card', 'x402']),
   currency: currencySchema, merchantCategoryCode: mccSchema.optional(),
   commitmentMonths: z.number().int().nonnegative().safe(),
   priceStatus: z.enum(['verified', 'price_unverified']), availability: z.enum(['available', 'region_unavailable']),
