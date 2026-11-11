@@ -77,7 +77,7 @@ export type CardStatus = z.infer<typeof cardStatusSchema>;
 // 只接受掩码卡号。数字总数不超过 12（BIN 可见掩码通常是 10 位），连续 13 位同样拒绝。
 const maskedNumberSchema = z.string().refine(value => hasMaskChar(value) && !/\d{13,}/.test(value) && digitCount(value) <= 12);
 
-/** 丢弃无掩码的卡号形态，并打上 panLikeValueDropped。带掩码字符的值留给 schema 决定。 */
+/** 掩码 schema 接受的值保留。其余只要像完整卡号（不论有没有掩码字符）就丢掉并打标。 */
 function dropPanLike(value: unknown): unknown {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
   const result = { ...value } as Record<string, unknown>;
@@ -85,10 +85,10 @@ function dropPanLike(value: unknown): unknown {
     const number = result[key];
     if (typeof number !== 'string' && typeof number !== 'number') continue;
     const text = String(number);
-    if (isPanLike(text) && !hasMaskChar(text)) {
-      delete result[key];
-      result['panLikeValueDropped'] = true;
-    }
+    if (maskedNumberSchema.safeParse(text).success) continue;
+    if (!isPanLike(text)) continue;
+    delete result[key];
+    result['panLikeValueDropped'] = true;
   }
   return result;
 }
@@ -187,9 +187,11 @@ export const simulationSchema = z.preprocess(dropPanLike, withExtra({
   network_transaction_id: z.string().optional().catch(undefined),
 }));
 export type SimulationResult = z.infer<typeof simulationSchema>;
-/** REFUND / REVERSAL 且 API 金额为正时取负；其余原样复制。不改写 transaction_amount。 */
+/** REFUND、REVERSAL，以及任意 *_REVERSAL（忽略大小写）且 API 金额为正时取负。不改写 transaction_amount。 */
 function signedAmountFor(type: string | undefined, amount: Amount): Amount {
-  if (type !== 'REFUND' && type !== 'REVERSAL') return amount;
+  const normalized = type?.toUpperCase();
+  const reversing = normalized === 'REFUND' || normalized === 'REVERSAL' || normalized?.endsWith('_REVERSAL') === true;
+  if (!reversing) return amount;
   if (typeof amount === 'number') return amount > 0 ? -amount : amount;
   if (amount.startsWith('-') || Number(amount) <= 0) return amount;
   return `-${amount}`;

@@ -17,9 +17,27 @@ export function hasMaskChar(value: string): boolean {
   return /[*xX•●#]/.test(value);
 }
 
-/** 先抹掉连续长串，再抹掉带空格或横线的卡号，避免 20 位以上只被截掉前 19 位。 */
+/**
+ * 无掩码且数字不少于 13 位时整段换成 [redacted]。
+ * 否则先抹连续长串（避免 20 位只截前 19 位），再抹任意非字母分隔符隔开的 13–19 位，
+ * 最后抹用掩码字母 x/X 隔开的长数字（x 是字母，上一则正则不会跨越它）。
+ */
 export function redactSensitiveText(value: string): string {
-  return value.replace(/\d{13,}/g, '[redacted]').replace(/\d(?:[ -]?\d){12,18}/g, '[redacted]');
+  if (digitCount(value) >= 13 && !hasMaskChar(value)) return '[redacted]';
+  return value
+    .replace(/\d{13,}/g, '[redacted]')
+    // 非字母分隔符，外加掩码字母 x/X。x 不在 [^\dA-Za-z] 里，否则 4111x1111… 会留在 raw。
+    .replace(/\d(?:[^\dA-Za-z]{0,2}\d){12,18}/g, '[redacted]')
+    .replace(/\d(?:(?:[^\dA-Za-z]|[xX]){0,2}\d){12,18}/g, '[redacted]');
+}
+
+/** 非 JSON 正文只留长度和脱敏后的前 200 字。length 是原文长度。 */
+export function nonJsonDiagnostic(text: string, length = text.length): { nonJson: true; length: number; head: string } {
+  const scrubbed = redactSensitiveText(text.replace(
+    /(pan|card_?number|cvv|cvc|token|secret|key|password|auth|security|verification)[^,&;\s]*\s*[:=]\s*\S+/gi,
+    '[redacted]',
+  ));
+  return { nonJson: true, length, head: scrubbed.slice(0, 200) };
 }
 
 function isDigitLike(value: unknown): boolean {
@@ -29,11 +47,12 @@ function isDigitLike(value: unknown): boolean {
 }
 
 function keepKey(key: string, value: unknown): boolean {
-  // 展示用掩码和消费控制不是凭证；auth 子串不能把 authorization_controls 一起丢掉。
-  if (key === 'masked_card_number' || key === 'authorization_controls') return true;
-  if (/^pin$/i.test(key)) return false;
-  if (/^number$/i.test(key) && isDigitLike(value)) return false;
-  return !/pan|card_number(?!_masked)|cvv|cvc|token|secret|key|password|auth|credential|security_code|expir/i.test(key);
+  // 展示用掩码和消费控制不是凭证。比较时忽略大小写，避免 MASKED_CARD_NUMBER 被误删。
+  const normalized = key.toLowerCase();
+  if (normalized === 'masked_card_number' || normalized === 'authorization_controls') return true;
+  if (/^pin$/i.test(normalized)) return false;
+  if (/^number$/i.test(normalized) && isDigitLike(value)) return false;
+  return !/pan|card_number(?!_masked)|cvv|cvc|token|secret|key|password|auth|credential|security|verification|expir/i.test(normalized);
 }
 
 /** Safe diagnostics only: never retain authentication material or unmasked PANs. */
@@ -41,7 +60,19 @@ export function redactBody(value: unknown, redactString: (value: string) => stri
   function walk(item: unknown, depth: number): unknown {
     // Unexpected nesting must not overflow the stack after card creation succeeds.
     if (depth > 100) return '[redacted]';
-    if (typeof item === 'string') return redactSensitiveText(redactString(item));
+    if (typeof item === 'string') {
+      const scrubbed = redactString(item);
+      const trimmed = scrubbed.trimStart();
+      // 字符串里再嵌一层 JSON 时先解析再走键规则，否则 cvv/token 只会留在文本里。
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          return walk(JSON.parse(trimmed) as unknown, depth + 1);
+        } catch {
+          // 不是合法 JSON，按普通文本脱敏。
+        }
+      }
+      return redactSensitiveText(scrubbed);
+    }
     if (typeof item === 'number' && (CONSECUTIVE_PAN.test(String(item)) || digitCount(String(item)) >= 13)) return '[redacted]';
     if (Array.isArray(item)) return item.map(child => walk(child, depth + 1));
     if (item !== null && typeof item === 'object') {
