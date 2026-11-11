@@ -48,6 +48,18 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
 
+  packages/policy:
+    dependencies:
+      '@sk/airwallex':
+        specifier: workspace:*
+        version: link:../airwallex
+      '@sr/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
+
   packages/schema:
     dependencies:
       zod:

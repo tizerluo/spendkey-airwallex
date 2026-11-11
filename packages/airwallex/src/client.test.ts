@@ -236,15 +236,24 @@ describe('issuing methods', () => {
     });
   });
 
-  it('generates a request ID once and preserves it across a 401 retry', async () => {
+  it('requires a caller request ID before making any request', () => {
+    const h = harness();
+    const { request_id: requestId, ...input } = cardInput;
+    expect(requestId).toBe('request_test_01');
+    // @ts-expect-error A stable caller-supplied request_id is required.
+    expect(() => h.client.createCard(input)).toThrow();
+    expect(h.calls).toEqual([]);
+  });
+
+  it('preserves the caller request ID across a 401 retry and separate calls', async () => {
     const h = harness({ 'POST /api/v1/issuing/cards/create': (_call, count) => count === 1 ? json({}, 401) : json(fixture('card-create')) });
-    const input = { ...cardInput };
-    delete input.request_id;
-    await h.client.createCard(input);
+    await h.client.createCard(cardInput);
+    await h.client.createCard(cardInput);
     const creates = h.calls.filter(call => call.path === '/api/v1/issuing/cards/create');
+    expect(creates).toHaveLength(3);
+    for (const create of creates) expect(body(create)).toMatchObject({ request_id: 'request_test_01' });
     expect(body(creates[0])).toEqual(body(creates[1]));
-    expect(body(creates[0])).toMatchObject({ request_id: expect.stringMatching(/^[a-f0-9-]{36}$/) });
-    expect(input.request_id).toBeUndefined();
+    expect(body(creates[0])).toEqual(body(creates[2]));
   });
 
   it('freezes, unfreezes, closes explicitly and updates controls via POST update', async () => {
