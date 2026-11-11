@@ -94,11 +94,10 @@ export function openJsonlLedger(path: string): LedgerStore {
     let result!: T;
     try { result = operation(); }
     catch (error) { failed = true; operationError = error; }
-    let cleanupFailed = false;
-    try { closeSync(lockFd); } catch { cleanupFailed = true; }
-    try { unlinkSync(lock); } catch { cleanupFailed = true; }
+    // 清理失败不能盖住已经成功的追加，否则调用方会重试并写出第二条记录。
+    try { closeSync(lockFd); } catch { /* 锁残留交给过期回收。 */ }
+    try { unlinkSync(lock); } catch { /* 同上。 */ }
     if (failed) throw operationError;
-    if (cleanupFailed) throw new Error('ledger_lock_cleanup_failed');
     return result;
   }
 

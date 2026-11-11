@@ -257,7 +257,7 @@ describe('redaction before storage', () => {
   const sensitive: unknown[] = [
     syntheticDigits.join(''), syntheticDigits.join(' '), syntheticDigits.join('-'),
     Number(syntheticDigits.join('')),
-    { cvv: '000' }, { CVV: '000' }, { note: 'cvv must be removed' },
+    { cvv: '000' }, { CVV: '000' },
     { auth: 'Bearer synthetic-value' }, { auth: 'bearer\nsynthetic-value' },
     { api_key: 'test-value' }, { apiKey: 'test-value' }, { 'x-api-key': 'test-value' },
     { access_token: 'test-value' }, { token: 'test-value' }, { client_secret: 'test-value' },
@@ -269,14 +269,15 @@ describe('redaction before storage', () => {
     for (const store of stores) {
       expect(() => assertRedacted(body)).toThrow(/^ledger_redaction_required$/);
       const event = { ...basic, hidden: body } as CardAuditEvent;
-      expect(() => store.append(event, AT)).toThrow(/^ledger_redaction_required$/);
+      // 未知容器在脱敏后仍过不了严格 schema，因此不会落盘。
+      expect(() => store.append(event, AT)).toThrow(/^invalid_card_audit_event$/);
       expect(store.read()).toEqual([]);
     }
     expect(readFileSync(file, 'utf8')).toBe('');
   });
 
   it('checks unknown input properties before validation can strip them', () => {
-    expect(() => appendEvent([], { ...basic, hidden: { cvv: '000' } } as CardAuditEvent, AT)).toThrow('ledger_redaction_required');
+    expect(() => appendEvent([], { ...basic, hidden: { cvv: '000' } } as CardAuditEvent, AT)).toThrow('invalid_card_audit_event');
   });
 
   it.each([NaN, Infinity, 1n, () => true, Symbol('test'), new Date(AT)])('rejects data that cannot be preserved as JSON', body => {

@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { canonicalize, sha256Hex } from '@sr/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   appendEvent, assertRedacted, CardAuditEventSchema, openInMemoryLedger, openJsonlLedger,
@@ -29,9 +30,14 @@ const sensitiveCases = [
   { id_token: 'test-value' }, { auth_token: 'test-value' }, { api_secret: 'test-value' },
   { secret_key: 'test-value' }, { 'x-api-key': 'test-value' }, { private_key: 'test-value' },
   { cvc: '000' }, { full_pan: 'test-value' }, { card_number: panGroups.join('') }, { cardNumber: panGroups.join('') },
-  { note: 'secret' }, { note: 'password: test-password' }, { note: 'bearer' },
-  { note: 'authorization' }, { note: 'cookie' }, { note: 'id_token' }, { note: 'auth_token' },
-  { note: 'api_secret' }, { note: 'secret_key' }, { note: 'x-api-key' },
+  { security_code: '999' }, { securityCode: '999' }, { card_security: '999' }, { cardSecurity: '999' },
+  { card_expiry: '12/30' }, { cardExpiry: '12/30' }, { card_expiration: '12/30' }, { expiration_card: '12/30' },
+  { number: '999' },
+  { note: ['sk', '_live_', 'a'.repeat(24)].join('') },
+  { note: ['sk', '_test_', 'b'.repeat(24)].join('') },
+  { note: ['xoxb-', 'c'.repeat(24)].join('') },
+  { note: ['AKIA', 'D'.repeat(16)].join('') },
+  { note: ['ghp', '_', 'e'.repeat(36)].join('') },
   { note: `Authorization: Basic ${Buffer.from('test-user:test-password').toString('base64')}` },
   { note: `Basic ${Buffer.from('test-user:test-value').toString('base64')}` },
   { note: ['-----BEGIN', 'PRIVATE KEY-----'].join(' ') },
@@ -44,6 +50,8 @@ describe('PAN and secret regressions', () => {
     for (let index = 0; index < 500; index += 1) {
       const hash = createHash('sha256').update(`synthetic-terms-${index}`).digest('hex');
       const requestId = `spk_${hash.slice(0, 40)}`;
+      expect(requestId).toHaveLength(44);
+      expect(requestId.length).toBeLessThanOrEqual(50);
       expect(() => assertRedacted({ termsHash: hash, presentedTermsHash: `0x${hash}`, requestId,
         transactionIds: [hash], cardId: requestId, raw_response: { nested: [hash] } })).not.toThrow();
       expect(() => appendEvent([], { kind: 'approval_granted', approvalRequestId: 'request_test_01',
@@ -68,7 +76,7 @@ describe('PAN and secret regressions', () => {
     const safe = redactValue(value);
     expect(() => assertRedacted(safe)).not.toThrow();
     expect(safe).not.toEqual(value);
-    expect(() => appendEvent([], { ...basic, hidden: value } as CardAuditEvent, AT)).toThrow('ledger_redaction_required');
+    expect(() => appendEvent([], { ...basic, hidden: value } as CardAuditEvent, AT)).toThrow('invalid_card_audit_event');
   });
 
   it('deep clones, preserves masked_card_number, and removes unsafe keys without prototype mutation', () => {
@@ -107,6 +115,113 @@ describe('PAN and secret regressions', () => {
     expect(response).toEqual(before);
     expect(readFileSync(file, 'utf8')).not.toContain(panGroups.join(' '));
     expect(openJsonlLedger(file).read()).toHaveLength(2);
+  });
+
+  it.each([
+    { note: 'secret' }, { note: 'password: test-password' }, { note: 'bearer' },
+    { note: 'authorization' }, { note: 'cookie' }, { note: 'id_token' }, { note: 'auth_token' },
+    { note: 'api_secret' }, { note: 'secret_key' }, { note: 'x-api-key' }, { note: 'cvv must be removed' },
+    { note: 'Authorization declined' }, { note: 'Secret Garden Cafe' }, { note: 'PAN AM CAFE' },
+    { note: 'Cookie jar' }, { note: 'Authorization limit token exceeded' },
+    { expiry: '12/30' }, { card_experiment: 'control' }, { account_number: '999' },
+  ])('keeps ordinary free text %#', value => {
+    expect(() => assertRedacted(value)).not.toThrow();
+    expect(redactValue(value)).toEqual(value);
+  });
+
+  it('drops extra card-secret keys and still redacts a PAN stored under a plain key', () => {
+    expect(redactValue({ x: { security_code: '999', card_security: '999', card_expiry: '12/30', number: '999' } })).toEqual({ x: {} });
+    expect(redactValue({ account_number: panGroups.join('') })).toEqual({ account_number: '[REDACTED]' });
+  });
+});
+
+describe('ordinary free text is stored and high-confidence secrets are redacted before hashing', () => {
+  const bearer = 'Bearer abc123def456ghi789';
+  const pan = panGroups.join('');
+  const spaced = panGroups.join(' ');
+  const dashed = panGroups.join('-');
+  const offer = {
+    offerId: 'offer_test_01', vendor: 'Test Vendor', product: 'Test Product', plan: 'one_time' as const, rail: 'card' as const,
+    price: { amount: '1.00', currency: 'USD', unit: 'one_time' as const },
+    priceStatus: 'price_unverified' as const, availability: 'available' as const,
+  };
+  const ordinary: CardAuditEvent[] = [
+    { kind: 'authorization', source: 'observed', cardId: 'card_test_01', amount: '1.00', currency: 'USD',
+      merchantName: 'Secret Garden Cafe', processResult: 'Approved', failureReason: 'Authorization declined', mapped: 'other' },
+    { kind: 'authorization', source: 'observed', cardId: 'card_test_01', amount: '1.00', currency: 'USD',
+      merchantName: 'PAN AM CAFE', processResult: 'Cookie jar', failureReason: 'Cookie jar', mapped: 'other' },
+    { kind: 'card_frozen', cardId: 'card_test_01', by: 'agent', reason: 'Authorization limit token exceeded' },
+    { kind: 'offers_snapshot', intent: 'Secret Garden Cafe', offers: [offer] },
+    { kind: 'comparison', candidates: [{ offerId: 'offer_test_01', rail: 'card', upfrontMinor: 100, perChargeMinor: 100,
+      horizonLowMinor: 100, horizonHighMinor: 100, notes: ['Cookie jar', 'Secret Garden Cafe'] }],
+      excluded: [{ offerId: 'offer_test_02', reason: 'PAN AM CAFE' }] },
+    { kind: 'decision', action: 'ask', reasons: ['Authorization limit token exceeded'],
+      ruleResults: [{ offerId: 'offer_test_01', rule: 'Secret Garden Cafe', pass: true, code: 'cookie_jar' }] },
+    { kind: 'approval_rejected', approvalRequestId: 'request_test_01', code: 'Authorization declined' },
+    { kind: 'card_issue_unconfirmed', approvalId: 'approval_test_01', requestId: 'spk_test_01', reason: 'Cookie jar' },
+  ];
+  const secrets: CardAuditEvent[] = [
+    { kind: 'authorization', source: 'observed', cardId: 'card_test_01', amount: '1.00', currency: 'USD',
+      merchantName: 'Secret Garden Cafe', failureReason: bearer, mapped: 'other' },
+    { kind: 'authorization', source: 'observed', cardId: 'card_test_01', amount: '1.00', currency: 'USD',
+      failureReason: spaced, processResult: bearer, mapped: 'other' },
+    { kind: 'authorization', source: 'observed', cardId: 'card_test_01', amount: '1.00', currency: 'USD',
+      failureReason: dashed, mapped: 'other' },
+    { kind: 'card_frozen', cardId: 'card_test_01', by: 'agent', reason: pan },
+    { kind: 'comparison', candidates: [{ offerId: 'offer_test_01', rail: 'card', upfrontMinor: 100, perChargeMinor: 100,
+      horizonLowMinor: 100, horizonHighMinor: 100, notes: ['Authorization declined', bearer] }],
+      excluded: [{ offerId: 'offer_test_02', reason: spaced }] },
+  ];
+
+  function digest(record: { seq: number; at: string; prevHash: string; event: unknown }): string {
+    return `0x${sha256Hex(canonicalize({ seq: record.seq, at: record.at, prevHash: record.prevHash, event: record.event }))}`;
+  }
+
+  it.each(['memory', 'jsonl'])('keeps the reviewed phrases and redacts bearer and PAN on %s', mode => {
+    const file = tempFile();
+    const store = mode === 'memory' ? openInMemoryLedger() : openJsonlLedger(file);
+    for (const event of ordinary) expect(store.append(event, AT).event).toEqual(event);
+    const bearerRecord = store.append(secrets[0]!, AT);
+    expect(bearerRecord.event).toMatchObject({ merchantName: 'Secret Garden Cafe', failureReason: '[REDACTED]' });
+    expect(bearerRecord.hash).toBe(digest(bearerRecord));
+    expect(bearerRecord.hash).not.toBe(digest({ ...bearerRecord, event: secrets[0] }));
+    expect(() => assertRedacted(secrets[0])).toThrow(/^ledger_redaction_required$/);
+    expect(() => assertRedacted(bearerRecord.event)).not.toThrow();
+    const spacedRecord = store.append(secrets[1]!, AT);
+    expect(spacedRecord.event).toMatchObject({ failureReason: '[REDACTED]', processResult: '[REDACTED]' });
+    expect(store.append(secrets[2]!, AT).event).toMatchObject({ failureReason: '[REDACTED]' });
+    expect(store.append(secrets[3]!, AT).event).toMatchObject({ reason: '[REDACTED]' });
+    const notes = store.append(secrets[4]!, AT).event;
+    expect(notes).toMatchObject({ candidates: [{ notes: ['Authorization declined', '[REDACTED]'] }],
+      excluded: [{ reason: '[REDACTED]' }] });
+    const records = store.read();
+    expect(verifyChain(records)).toEqual({ ok: true });
+    for (const record of records) expect(record.hash).toBe(digest(record));
+    store.close();
+    if (mode === 'jsonl') {
+      const text = readFileSync(file, 'utf8');
+      for (const phrase of ['Authorization declined', 'Secret Garden Cafe', 'PAN AM CAFE', 'Cookie jar', 'Authorization limit token exceeded']) {
+        expect(text).toContain(phrase);
+      }
+      expect(text).not.toContain(bearer);
+      expect(text).not.toContain('abc123def456ghi789');
+      expect(text).not.toContain(pan);
+      expect(text).not.toContain(spaced);
+      expect(text).not.toContain(dashed);
+    }
+  });
+});
+
+describe('timestamp order', () => {
+  it('rejects an earlier instant and allows equal instants written with another offset', () => {
+    const first = appendEvent([], basic, AT);
+    expect(() => appendEvent([first], basic, '2030-01-01T00:30:00.000+02:00')).toThrow(/^non_monotonic_timestamp$/);
+    const sameInstant = appendEvent([first], basic, '2029-12-31T23:00:00.000-01:00');
+    expect(verifyChain([first, sameInstant])).toEqual({ ok: true });
+    const payload = { seq: 1, at: '2029-12-31T22:00:00.000Z', prevHash: first.hash, event: basic };
+    const earlier = { ...payload, hash: `0x${sha256Hex(canonicalize(payload))}` };
+    expect(verifyChain([first, earlier])).toEqual({ ok: false, brokenAt: 1, error: 'non_monotonic_timestamp' });
+    expect(appendEvent([first], basic, AT).seq).toBe(1);
   });
 });
 

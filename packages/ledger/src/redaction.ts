@@ -1,6 +1,19 @@
-const sensitiveKey = /cvv|cvc|(^|_|-)pan($|_|-)|card_?number|token|secret|api[-_]?key|password|passwd|authorization|cookie|private[-_]?key/i;
-const secretText = /\bcvv\b|\bcvc\b|\bpan\b|\bbearer\b|\bsecret\b|\bpassword\b|\bpasswd\b|\bauthorization\b|\bcookie\b|api[\s_-]?key|(?:client|webhook|api)[\s_-]?secret|secret[\s_-]?key|(?:id|auth|access|refresh)[\s_-]?token|\btoken\b|private[\s_-]?key|basic\s+[a-z0-9+/=]{8,}/i;
-const secretShape = /\bsk-[a-z0-9_-]{16,}|\bAKIA[a-z0-9]{16}|\bgh[pousr]_[a-z0-9]{20,}|\bgithub_pat_[a-z0-9_]{20,}|\beyJ[a-z0-9_-]*\.[a-z0-9_-]+\.[a-z0-9_-]+/i;
+// 只匹配键名。自由文本里的 authorization、secret、token、cookie、pan 等普通词不走这里。
+const sensitiveKey = /cvv|cvc|(?:^|_|-)pan(?:$|_|-)|card_?number|security_?code|card_?security|(?:card[\w-]*expir(?:y|ation)|expir(?:y|ation)[\w-]*card)|^number$|token|secret|api[-_]?key|password|passwd|authorization|cookie|private[-_]?key/i;
+
+// 自由文本只认高置信度形态，避免把商户名、失败原因和规则说明整段丢掉。
+const highConfidencePatterns = [
+  /\bsk-[a-z0-9_-]{16,}/i,
+  /\bsk_(?:live|test)_[a-z0-9]{10,}/i,
+  /\bAKIA[a-z0-9]{16}/i,
+  /\bgh[pousr]_[a-z0-9]{20,}/i,
+  /\bgithub_pat_[a-z0-9_]{20,}/i,
+  /\bxox[a-z]-[a-z0-9-]{10,}/i,
+  /\beyJ[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}/i,
+  /\bbearer\s+[a-z0-9._~+/=-]{12,}/i,
+  /\bbasic\s+[a-z0-9+/]{8,}={0,2}/i,
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/i,
+];
 
 function luhn(digits: string): boolean {
   let sum = 0;
@@ -12,9 +25,10 @@ function luhn(digits: string): boolean {
   return sum % 10 === 0;
 }
 
+/** 值是否含高置信度密钥或通过 Luhn 的独立 PAN（含空格和连字符）。 */
 function flagged(text: string): boolean {
-  if (secretText.test(text) || secretShape.test(text)) return true;
-  // Exempt hex hashes and contemporary 13-digit epoch-ms values from PAN checks.
+  if (highConfidencePatterns.some(pattern => pattern.test(text))) return true;
+  // 哈希和 13 位纪元毫秒不参与 PAN 判断，避免审批哈希被误伤。
   if (/^(0x)?[0-9a-f]{32,}$/i.test(text) || /^[12]\d{12}$/.test(text)) return false;
   for (const match of text.matchAll(/(?<![\w-])\d(?:[ -]?\d){12,18}(?![\w-])/g)) {
     const digits = match[0].replace(/[ -]/g, '');
@@ -24,10 +38,10 @@ function flagged(text: string): boolean {
 }
 
 function unsafeKey(key: string): boolean {
-  return key !== 'masked_card_number' && (sensitiveKey.test(key) || flagged(key));
+  return key !== 'masked_card_number' && sensitiveKey.test(key);
 }
 
-/** Shared JSON traversal keeps the sanitizer and the final guard in agreement. */
+/** 脱敏与最终守卫共用同一次遍历，避免两边规则漂移。 */
 function walk(value: unknown, sanitize: boolean): unknown {
   const ancestors = new Set<object>();
   function visit(item: unknown): unknown {
@@ -47,12 +61,12 @@ function walk(value: unknown, sanitize: boolean): unknown {
       ancestors.add(item);
       const result = Array.isArray(item) ? item.map(visit) : Object.fromEntries(
         Object.entries(item).flatMap(([key, child]) => {
+          // 敏感键名直接丢弃；键名本身不再套用自由文本词表。
           if (unsafeKey(key)) {
             if (sanitize) return [];
             throw new Error('ledger_redaction_required');
           }
-          // The contract uses authorization as an event discriminator.
-          return [[key, key === 'kind' && child === 'authorization' ? child : visit(child)]];
+          return [[key, visit(child)]];
         }),
       );
       ancestors.delete(item);
@@ -67,12 +81,11 @@ function walk(value: unknown, sanitize: boolean): unknown {
   return visit(value);
 }
 
-/** Deep clone JSON data, dropping sensitive keys and masking flagged values.
- * Callers must use this for tolerant response handling, including response-derived
- * optional card fields. Append also sanitizes raw_response.body/card_issued.controls.
- * masked_card_number is retained, but its value still passes the content checks.
+/** 深拷贝 JSON：删除敏感键，并把高置信度密钥形态替换为 "[REDACTED]"。
+ * 自由文本中的普通词会原样保留。masked_card_number 保留键名，值仍做内容检查。
+ * append 会先对整条事件调用本函数，再跑 assertRedacted。
  */
 export function redactValue(value: unknown): unknown { return walk(value, true); }
 
-/** Reject sensitive content without ever echoing the offending key or value. */
+/** 最终守卫。自由文本只用高置信度形态；键只检查敏感键名。错误不回显键或值。 */
 export function assertRedacted(value: unknown): void { walk(value, false); }
