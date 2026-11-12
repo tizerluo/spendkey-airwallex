@@ -243,7 +243,7 @@ describe('independent recovery pagination', () => {
 });
 
 describe('independent signed transaction amounts', () => {
-  it('negates positive REFUND and REVERSAL amounts without rewriting transaction_amount', async () => {
+  it('uses the inverse provider sign regardless of transaction type', async () => {
     const rows = [
       { transaction_id: 'transaction_refund', transaction_type: 'REFUND', transaction_amount: '3.00', transaction_currency: 'USD' },
       { transaction_id: 'transaction_refund_lower', transaction_type: 'refund', transaction_amount: '3.00', transaction_currency: 'USD' },
@@ -260,8 +260,8 @@ describe('independent signed transaction amounts', () => {
     expect(byId.get('transaction_refund_lower')).toMatchObject({ transaction_amount: '3.00', signedAmount: '-3.00' });
     expect(byId.get('transaction_reversal')).toMatchObject({ transaction_amount: 3, signedAmount: -3 });
     expect(byId.get('transaction_clearing')).toMatchObject({ transaction_amount: '1.25', signedAmount: '-1.25' });
-    expect(byId.get('transaction_purchase')).toMatchObject({ transaction_amount: '3.00', signedAmount: '3.00' });
-    expect(byId.get('transaction_negative_refund')).toMatchObject({ transaction_amount: '-3.00', signedAmount: '-3.00' });
+    expect(byId.get('transaction_purchase')).toMatchObject({ transaction_amount: '3.00', signedAmount: '-3.00' });
+    expect(byId.get('transaction_negative_refund')).toMatchObject({ transaction_amount: '-3.00', signedAmount: '3.00' });
     expect(byId.get('transaction_zero_refund')).toMatchObject({ transaction_amount: '0', signedAmount: '0' });
   });
 });

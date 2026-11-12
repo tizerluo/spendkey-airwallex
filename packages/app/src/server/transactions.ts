@@ -127,6 +127,7 @@ export class TransactionLoop {
     for (const transaction of transactions.values()) {
       const { status } = transaction;
       if (status !== 'PENDING' && status !== 'SUCCEEDED' && status !== 'FAILED') throw new ServiceError('transaction_status_unknown');
+      // signedAmount is spend in major units: the inverse of the provider sign.
       const amount = String(transaction.signedAmount);
       const minor = signedDecimalToMinor(amount, transaction.transaction_currency);
       if (status === 'FAILED') failedCount++;
@@ -158,11 +159,12 @@ export class TransactionLoop {
     if (!cardId) return;
     this.#ownedCard(cardId);
     const { ledger } = this.service.options;
+    const transactionId = transaction.card_transaction_data?.card_transaction_id ?? transaction.card_transaction_id ?? transaction.transaction_id;
     if (ledger.read().some(({ event }) => event.kind === 'authorization' && event.source === 'observed'
-      && event.cardId === cardId && event.transactionId === transaction.transaction_id && event.processResult === transaction.status)) return;
+      && event.cardId === cardId && event.transactionId === transactionId && event.processResult === transaction.status)) return;
     const merchant = transaction.merchant ?? transaction.merchant_info;
     ledger.append({ kind: 'authorization', source: 'observed', cardId, amount: String(transaction.signedAmount),
-      currency: transaction.transaction_currency, transactionId: transaction.transaction_id,
+      currency: transaction.transaction_currency, transactionId,
       ...(transaction.status === undefined ? {} : { processResult: transaction.status }),
       ...(transaction.failure_reason == null ? {} : { failureReason: transaction.failure_reason }),
       ...(merchant?.category_code === undefined || !/^\d{4}$/.test(merchant.category_code) ? {} : { merchantCategoryCode: merchant.category_code }),

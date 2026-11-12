@@ -29,7 +29,14 @@
           "interval": "PER_TRANSACTION"
         }
       ]
-    }
+    },
+    "allowed_merchant_brands": {
+      "categories": [],
+      "ids": [],
+      "subcategories": []
+    },
+    "allowed_merchant_countries": [],
+    "blocked_transaction_usages": []
   },
   "card_id": "card_test_01",
   "alert_settings": {

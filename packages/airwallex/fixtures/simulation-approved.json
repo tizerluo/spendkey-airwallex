@@ -1,13 +1,24 @@
 {
   "process_result": "APPROVED",
-  "failure_reason": null,
-  "card_transaction_id": "transaction_test_01",
+  "card_transaction_id": "card_transaction_test_01",
   "card_transaction_lifecycle_id": "lifecycle_test_01",
   "auth_code": "test-auth-code",
   "masked_card_number": "************0000",
   "merchant": {
-    "name": "Test Merchant",
-    "category_code": "5734"
+    "name": "Synthetic Merchant",
+    "city": "Test City",
+    "country": "AUS",
+    "category_code": "7372"
   },
-  "network_transaction_id": "network_test_01"
+  "network_transaction_id": "network_test_01",
+  "card_transaction_event_id": "event_test_01",
+  "card_id": "card_test_01",
+  "type": "AUTHORIZATION",
+  "subtype": "AUTHORIZATION",
+  "transacted_at": "2030-01-01T00:00:00Z",
+  "updated_at": "2030-01-01T00:00:00Z",
+  "transaction_amount": 10,
+  "transaction_currency": "USD",
+  "billing_amount": 10,
+  "billing_currency": "USD"
 }

@@ -286,19 +286,20 @@ export function normalizeControls(value: unknown, key = ''): unknown {
   return value;
 }
 
-/** Compare sent keys recursively. Provider defaults stay visible in actual evidence. */
-export function controlsMatch(expected: unknown, actual: unknown, key = ''): boolean {
+/** Compare sent keys recursively. Limits are conjunctive; provider additions only restrict. */
+export function controlsMatch(expected: unknown, actual: unknown, key = '', parent = ''): boolean {
   if (Array.isArray(expected)) {
     if (!Array.isArray(actual)) return false;
-    // Equality of sets, including object members projected onto the keys we sent.
-    return expected.every(item => actual.some(other => controlsMatch(item, other, key)))
-      && actual.every(item => expected.some(other => controlsMatch(other, item, key)));
+    // Compare members projected onto sent keys; only transaction limits allow additions.
+    const containsSent = expected.every(item => actual.some(other => controlsMatch(item, other, key)));
+    if (parent === 'transaction_limits' && key === 'limits') return containsSent;
+    return containsSent && actual.every(item => expected.some(other => controlsMatch(other, item, key)));
   }
   if (expected !== null && typeof expected === 'object') {
     if (actual === null || typeof actual !== 'object' || Array.isArray(actual)) return false;
     const record = actual as Record<string, unknown>;
     return Object.entries(expected).every(([name, value]) => Object.hasOwn(record, name)
-      && controlsMatch(value, record[name], name));
+      && controlsMatch(value, record[name], name, key));
   }
   return normalizeControls(expected, key) === normalizeControls(actual, key);
 }

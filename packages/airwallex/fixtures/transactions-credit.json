@@ -1,0 +1,34 @@
+{
+  "items": [
+    {
+      "card_id": "card_test_01",
+      "status": "SUCCEEDED",
+      "transaction_amount": 3,
+      "transaction_currency": "USD",
+      "failure_reason": null,
+      "transaction_id": "transaction_test_credit",
+      "transaction_type": "REFUND",
+      "transaction_date": "2030-01-01T00:00:00Z",
+      "billing_amount": 3,
+      "billing_currency": "USD",
+      "card_transaction_data": {
+        "card_transaction_id": "card_transaction_test_credit",
+        "card_transaction_event_id": "event_test_credit",
+        "card_transaction_lifecycle_id": "lifecycle_test_credit"
+      },
+      "merchant": {
+        "name": "Synthetic Merchant",
+        "city": "Test City",
+        "country": "AUS",
+        "category_code": "7372",
+        "identifier": "000000",
+        "additional_merchant_info": {
+          "merchant_category": "Synthetic services",
+          "merchant_sub_category": "Synthetic software"
+        }
+      },
+      "masked_card_number": "************0000"
+    }
+  ],
+  "has_more": false
+}

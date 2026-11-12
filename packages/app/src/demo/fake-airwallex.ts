@@ -27,12 +27,12 @@ export function createFakeAirwallex(options: { now?: () => Date; unconfirmedCrea
       const existing = [...cards.values()].find(card => card.request_id === input.request_id);
       if (existing) return json(existing);
       const cardId = `card_test_${cards.size + 1}`;
-      const card: Card = { card_id: cardId, card_status: 'ACTIVE', card_number: '****0001',
+      const card: Card = { card_id: cardId, card_status: 'ACTIVE', card_number: '************0000',
         request_id: input.request_id, nick_name: input.nick_name,
         authorization_controls: input.authorization_controls, created_at: now().toISOString() };
       cards.set(cardId, card); inputs.set(cardId, input);
       // Server-side effect succeeds, but the response has no recoverable card ID.
-      return json(options.unconfirmedCreate ? { result: 'created_with_new_shape', token: 'test-session', api_key: 'test-api-key', cvv: 'test-cvv', card_number: 'synthetic-disallowed-field' } : card);
+      return json(options.unconfirmedCreate ? { result: 'created_with_new_shape', token: 'test-session', api_key: 'test-api-key', cvv: 'test-cvv', card_number: 'synthetic-disallowed-field' } : card, 202);
     }
     if (path === '/api/v1/issuing/cards') return json({ items: [...cards.values()], has_more: false });
     const cardRoute = /^\/api\/v1\/issuing\/cards\/([a-zA-Z0-9_-]+)(\/update)?$/.exec(path);
@@ -40,6 +40,14 @@ export function createFakeAirwallex(options: { now?: () => Date; unconfirmedCrea
       const card = cards.get(cardRoute[1]!);
       if (!card) return json({ code: 'NOT_FOUND' }, 404);
       if (cardRoute[2]) card.card_status = String(body['card_status']);
+      if (!cardRoute[2] && card.authorization_controls) {
+        return json({ ...card, authorization_controls: { ...card.authorization_controls,
+          allowed_merchant_brands: { categories: [], ids: [], subcategories: [] },
+          allowed_merchant_countries: [], blocked_transaction_usages: [],
+          transaction_limits: { ...card.authorization_controls.transaction_limits,
+            limits: [...card.authorization_controls.transaction_limits.limits, { amount: 10000, interval: 'PER_TRANSACTION' }] },
+        } });
+      }
       return json(card);
     }
     if (path === '/api/v1/simulation/issuing/create') {
@@ -65,18 +73,42 @@ export function createFakeAirwallex(options: { now?: () => Date; unconfirmedCrea
         }
       }
       const transactionId = `transaction_test_${transactions.length + 1}`;
-      transactions.push({ transaction_id: transactionId, card_id: cardId, transaction_amount: amount, signedAmount: amount,
-        transaction_currency: currency, transaction_date: now().toISOString(), status: failure ? 'FAILED' : 'SUCCEEDED',
+      const sequence = String(transactions.length + 1).padStart(2, '0');
+      const cardTransactionId = `card_transaction_test_${sequence}`;
+      const eventId = `event_test_${sequence}`;
+      const lifecycleId = `lifecycle_test_${sequence}`;
+      const merchant = { name: 'Synthetic DesignCo', city: 'Test City', country: 'AUS', category_code: mcc };
+      transactions.push({ transaction_id: transactionId, card_id: cardId, transaction_amount: -Number(amount), signedAmount: Number(amount),
+        billing_amount: -Number(amount), billing_currency: currency,
+        transaction_type: 'AUTHORIZATION', transaction_currency: currency, transaction_date: now().toISOString(),
+        status: failure ? 'FAILED' : 'PENDING', masked_card_number: '************0000',
+        card_transaction_data: { card_transaction_id: cardTransactionId, card_transaction_event_id: eventId,
+          card_transaction_lifecycle_id: lifecycleId },
         ...(failure === undefined ? {} : { failure_reason: failure }),
-        merchant: { name: 'Synthetic DesignCo', category_code: mcc, extra: {} }, extra: {},
+        merchant: { ...merchant, extra: { identifier: '000000', additional_merchant_info: {
+          merchant_category: 'Synthetic services', merchant_sub_category: 'Synthetic software',
+        } } }, extra: {},
       });
-      return json({ process_result: failure ? 'DECLINED' : 'APPROVED', failure_reason: failure ?? null, card_transaction_id: transactionId });
+      return json({ process_result: failure ? 'DECLINED' : 'APPROVED', ...(failure ? { failure_reason: failure } : {}),
+        card_transaction_id: cardTransactionId, card_transaction_event_id: eventId, card_transaction_lifecycle_id: lifecycleId,
+        type: 'AUTHORIZATION', subtype: 'AUTHORIZATION', card_id: cardId, merchant,
+        transaction_amount: Number(amount), transaction_currency: currency, billing_amount: Number(amount), billing_currency: currency,
+        transacted_at: now().toISOString(), updated_at: now().toISOString(), masked_card_number: '************0000',
+      }, 201);
     }
     if (path === '/api/v1/issuing/transactions') return json({ has_more: false, items: transactions.filter(transaction => {
       const at = transaction.transaction_date!;
       return (!url.searchParams.get('card_id') || transaction.card_id === url.searchParams.get('card_id'))
         && (!url.searchParams.get('from_created_at') || at >= url.searchParams.get('from_created_at')!)
         && (!url.searchParams.get('to_created_at') || at <= url.searchParams.get('to_created_at')!);
+    }).map(transaction => {
+      const raw: Record<string, unknown> = { ...transaction };
+      delete raw['signedAmount']; delete raw['extra'];
+      if (transaction.merchant) {
+        const { extra, ...merchant } = transaction.merchant;
+        raw['merchant'] = { ...merchant, ...(extra !== null && typeof extra === 'object' ? extra : {}) };
+      }
+      return raw;
     }) });
     throw new Error('fake_route_not_implemented');
   };

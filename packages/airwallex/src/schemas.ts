@@ -187,14 +187,12 @@ export const simulationSchema = z.preprocess(dropPanLike, withExtra({
   network_transaction_id: z.string().optional().catch(undefined),
 }));
 export type SimulationResult = z.infer<typeof simulationSchema>;
-/** REFUND, REVERSAL, and any *_REVERSAL (case-insensitive) become negative when the API amount is positive. transaction_amount is not rewritten. */
-function signedAmountFor(type: string | undefined, amount: Amount): Amount {
-  const normalized = type?.toUpperCase();
-  const reversing = normalized === 'REFUND' || normalized === 'REVERSAL' || normalized?.endsWith('_REVERSAL') === true;
-  if (!reversing) return amount;
-  if (typeof amount === 'number') return amount > 0 ? -amount : amount;
-  if (amount.startsWith('-') || Number(amount) <= 0) return amount;
-  return `-${amount}`;
+/** Spend convention: negate the provider amount, regardless of type. Negative debits
+ * become positive spend; positive credits reduce spend. Preserve decimal precision. */
+function spendAmountFor(amount: Amount): Amount {
+  if (typeof amount === 'number') return amount === 0 ? 0 : -amount;
+  if (/^-?0+(?:\.0+)?$/.test(amount)) return amount;
+  return amount.startsWith('-') ? amount.slice(1) : `-${amount}`;
 }
 export const transactionSchema = z.preprocess(dropPanLike, withExtra({
   transaction_id: z.string().min(1), card_id: z.string().optional(),
@@ -202,12 +200,16 @@ export const transactionSchema = z.preprocess(dropPanLike, withExtra({
   transaction_amount: amountSchema, transaction_currency: z.string(),
   billing_amount: amountSchema.optional(), billing_currency: z.string().optional(),
   card_transaction_id: z.string().optional(), card_transaction_lifecycle_id: z.string().optional(),
+  card_transaction_data: z.object({
+    card_transaction_event_id: z.string().optional(), card_transaction_id: z.string().optional(),
+    card_transaction_lifecycle_id: z.string().optional(),
+  }).optional(),
   merchant: responseMerchantSchema.optional(), merchant_info: responseMerchantSchema.optional(),
   failure_reason: z.string().nullable().optional(), transaction_date: z.string().optional(),
   masked_card_number: maskedNumberSchema.optional().catch(undefined), panLikeValueDropped: z.literal(true).optional(),
 })).transform(transaction => ({
   ...transaction,
-  signedAmount: signedAmountFor(transaction.transaction_type, transaction.transaction_amount),
+  signedAmount: spendAmountFor(transaction.transaction_amount),
 }));
 export type IssuingTransaction = z.infer<typeof transactionSchema>;
 export const transactionsSchema = z.object({

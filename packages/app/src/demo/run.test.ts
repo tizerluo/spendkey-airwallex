@@ -40,6 +40,14 @@ it('runs the offline main line with exact ledger events, durable JSONL, controls
     expect(result.ledger.read()[0]?.event).toMatchObject({ kind: 'run_started', mode: 'offline_emulator', policyNotes: [expect.stringContaining('reserve floor'), expect.any(String)] });
     expect(result.ledger.read().filter(({ event }) => event.kind === 'controls_readback').map(({ event }) => event)).toMatchObject([{ matches: true }]);
     expect(result.ledger.read().find(({ event }) => event.kind === 'card_frozen')?.event).toMatchObject({ by: 'human', reason: expect.stringMatching(/^demo-operator:/) });
+    expect(result.ledger.read().find(({ event }) => event.kind === 'reconciliation')?.event)
+      .toMatchObject({ settledMinor: 0, pendingMinor: 1000, failedCount: 3 });
+    const authorizations = result.ledger.read().flatMap(({ event }) => event.kind === 'authorization' ? [event] : []);
+    const simulated = authorizations.filter(event => event.source === 'simulated');
+    const observed = authorizations.filter(event => event.source === 'observed');
+    expect(observed.map(event => event.transactionId)).toEqual(simulated.map(event => event.transactionId));
+    expect(result.fake.transactions[0]).toMatchObject({ transaction_amount: -10, billing_amount: -10, status: 'PENDING',
+      card_transaction_data: { card_transaction_id: simulated[0]?.transactionId } });
     expect(result.fake.createCalls).toBe(1);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

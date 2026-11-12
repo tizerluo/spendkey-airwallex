@@ -5,45 +5,140 @@
       "card_id": "card_test_01",
       "transaction_type": "AUTHORIZATION",
       "status": "FAILED",
-      "transaction_amount": "50.00",
+      "transaction_amount": -50.0,
       "transaction_currency": "USD",
-      "failure_reason": "LIMIT_EXCEEDED"
+      "failure_reason": "LIMIT_EXCEEDED",
+      "billing_amount": -50.0,
+      "billing_currency": "USD",
+      "card_transaction_data": {
+        "card_transaction_id": "card_transaction_test_01",
+        "card_transaction_event_id": "event_test_01",
+        "card_transaction_lifecycle_id": "lifecycle_test_01"
+      },
+      "merchant": {
+        "name": "Synthetic Merchant",
+        "city": "Test City",
+        "country": "AUS",
+        "category_code": "7372",
+        "identifier": "000000",
+        "additional_merchant_info": {
+          "merchant_category": "Synthetic services",
+          "merchant_sub_category": "Synthetic software"
+        }
+      },
+      "masked_card_number": "************0000"
     },
     {
       "transaction_id": "transaction_ind_02",
       "card_id": "card_test_01",
       "transaction_type": "AUTHORIZATION",
       "status": "FAILED",
-      "transaction_amount": "50.00",
+      "transaction_amount": -50.0,
       "transaction_currency": "USD",
-      "failure_reason": "MERCHANT_CATEGORY_NOT_ALLOWED"
+      "failure_reason": "MERCHANT_CATEGORY_NOT_ALLOWED",
+      "billing_amount": -50.0,
+      "billing_currency": "USD",
+      "card_transaction_data": {
+        "card_transaction_id": "card_transaction_test_02",
+        "card_transaction_event_id": "event_test_02",
+        "card_transaction_lifecycle_id": "lifecycle_test_02"
+      },
+      "merchant": {
+        "name": "Synthetic Merchant",
+        "city": "Test City",
+        "country": "AUS",
+        "category_code": "7372",
+        "identifier": "000000",
+        "additional_merchant_info": {
+          "merchant_category": "Synthetic services",
+          "merchant_sub_category": "Synthetic software"
+        }
+      },
+      "masked_card_number": "************0000"
     },
     {
       "transaction_id": "transaction_ind_03",
       "card_id": "card_test_01",
       "transaction_type": "AUTHORIZATION",
       "status": "FAILED",
-      "transaction_amount": "50.00",
+      "transaction_amount": -50.0,
       "transaction_currency": "USD",
-      "failure_reason": "CURRENCY_NOT_ALLOWED"
+      "failure_reason": "CURRENCY_NOT_ALLOWED",
+      "billing_amount": -50.0,
+      "billing_currency": "USD",
+      "card_transaction_data": {
+        "card_transaction_id": "card_transaction_test_03",
+        "card_transaction_event_id": "event_test_03",
+        "card_transaction_lifecycle_id": "lifecycle_test_03"
+      },
+      "merchant": {
+        "name": "Synthetic Merchant",
+        "city": "Test City",
+        "country": "AUS",
+        "category_code": "7372",
+        "identifier": "000000",
+        "additional_merchant_info": {
+          "merchant_category": "Synthetic services",
+          "merchant_sub_category": "Synthetic software"
+        }
+      },
+      "masked_card_number": "************0000"
     },
     {
       "transaction_id": "transaction_ind_04",
       "card_id": "card_test_01",
       "transaction_type": "AUTHORIZATION",
       "status": "FAILED",
-      "transaction_amount": "50.00",
+      "transaction_amount": -50.0,
       "transaction_currency": "USD",
-      "failure_reason": "CARD_INACTIVE"
+      "failure_reason": "CARD_INACTIVE",
+      "billing_amount": -50.0,
+      "billing_currency": "USD",
+      "card_transaction_data": {
+        "card_transaction_id": "card_transaction_test_04",
+        "card_transaction_event_id": "event_test_04",
+        "card_transaction_lifecycle_id": "lifecycle_test_04"
+      },
+      "merchant": {
+        "name": "Synthetic Merchant",
+        "city": "Test City",
+        "country": "AUS",
+        "category_code": "7372",
+        "identifier": "000000",
+        "additional_merchant_info": {
+          "merchant_category": "Synthetic services",
+          "merchant_sub_category": "Synthetic software"
+        }
+      },
+      "masked_card_number": "************0000"
     },
     {
       "transaction_id": "transaction_ind_05",
       "card_id": "card_test_01",
       "transaction_type": "AUTHORIZATION",
       "status": "FAILED",
-      "transaction_amount": "50.00",
+      "transaction_amount": -50.0,
       "transaction_currency": "USD",
-      "failure_reason": "RISK_DECLINED"
+      "failure_reason": "RISK_DECLINED",
+      "billing_amount": -50.0,
+      "billing_currency": "USD",
+      "card_transaction_data": {
+        "card_transaction_id": "card_transaction_test_05",
+        "card_transaction_event_id": "event_test_05",
+        "card_transaction_lifecycle_id": "lifecycle_test_05"
+      },
+      "merchant": {
+        "name": "Synthetic Merchant",
+        "city": "Test City",
+        "country": "AUS",
+        "category_code": "7372",
+        "identifier": "000000",
+        "additional_merchant_info": {
+          "merchant_category": "Synthetic services",
+          "merchant_sub_category": "Synthetic software"
+        }
+      },
+      "masked_card_number": "************0000"
     }
   ],
   "has_more": false

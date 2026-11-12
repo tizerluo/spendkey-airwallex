@@ -86,13 +86,13 @@ function createTransport() {
           && transaction['status'] !== 'FAILED');
         if (controls.allowed_transaction_count === 'SINGLE' && approved.length > 0) failure = 'LIMIT_EXCEEDED';
         const limit = controls.transaction_limits.limits[0]!;
-        const used = approved.reduce((sum, transaction) => sum + minor(transaction['transaction_amount']), 0);
+        const used = approved.reduce((sum, transaction) => sum - minor(transaction['transaction_amount']), 0);
         const total = minor(amount) + (limit.interval === 'PER_TRANSACTION' ? 0 : used);
         if (total > minor(limit.amount)) failure = 'LIMIT_EXCEEDED';
       }
       const transactionId = `transaction_test_${transactions.length + 1}`;
       transactions.push({
-        transaction_id: transactionId, card_id: card.card_id, transaction_amount: amount, signedAmount: amount,
+        transaction_id: transactionId, card_id: card.card_id, transaction_amount: -Number(amount),
         transaction_currency: currency, transaction_date: instant, status: failure ? 'FAILED' : 'SUCCEEDED',
         ...(failure === undefined ? {} : { failure_reason: failure }),
         merchant: { name: 'Synthetic Shop', category_code: mcc, extra: {} }, extra: {},

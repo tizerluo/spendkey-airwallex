@@ -84,7 +84,7 @@ describe('offline console video fallback', () => {
       expect(JSON.parse(inactive.text)).toEqual({ mapped: 'card_inactive', label: 'emulated (offline)' });
       const reconciliation = await send(app.url, '/reconcile', { csrf: fields.csrf, cardId: cardPath.split('/')[2]! }, token);
       expect(reconciliation.status).toBe(200);
-      expect(JSON.parse(reconciliation.text)).toMatchObject({ settledMinor: 1000, failedCount: 3 });
+      expect(JSON.parse(reconciliation.text)).toMatchObject({ settledMinor: 0, pendingMinor: 1000, failedCount: 3 });
       const audit = await send(app.url, '/audit');
       expect(audit.status).toBe(200); expect(audit.text).toContain('Chain valid');
       expect(audit.text).toContain('emulated (offline)'); expect(audit.text.toLowerCase()).not.toContain('sandbox');
@@ -282,7 +282,7 @@ describe('controls readback projection', () => {
     expect(readback).toMatchObject({ matches: change === 'extras' });
     if (change === 'extras') {
       expect(readback).toMatchObject({ actual: { active_from: null, active_to: '2099-01-01', provider_default: null,
-        transaction_limits: { limits: [{ amount: '60.00', remaining: 60 }] } } });
+        transaction_limits: { limits: [{ amount: '60.00', remaining: 60 }, { amount: 10000, interval: 'PER_TRANSACTION' }] } } });
       expect(JSON.stringify(readback)).not.toContain('test-redacted-key');
     } else {
       expect(service.options.store.list()[0]?.card?.status).toBe('INACTIVE');

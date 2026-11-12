@@ -297,7 +297,7 @@ describe('issuing methods', () => {
     const h = harness({ 'POST /api/v1/simulation/issuing/create': () => json(fixture(`simulation-${outcome}`), 201) });
     const result = await h.client.simulateAuthorization(simulationInput);
     expect(result.process_result).toBe(outcome === 'approved' ? 'APPROVED' : 'DECLINED');
-    expect(result.failure_reason).toBe(outcome === 'approved' ? null : outcome.toUpperCase().replaceAll('-', '_'));
+    expect(result.failure_reason).toBe(outcome === 'approved' ? undefined : outcome.toUpperCase().replaceAll('-', '_'));
     expect(h.calls.at(-1)?.method).toBe('POST');
     expect(h.calls.at(-1)?.path).toBe('/api/v1/simulation/issuing/create');
     expect(body(h.calls.at(-1))).toEqual({ ...simulationInput, transaction_amount: 20 });

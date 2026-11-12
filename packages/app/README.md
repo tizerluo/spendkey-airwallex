@@ -39,7 +39,7 @@ For the fallback video:
 3. Return to the approval page, paste the operator token and freeze the card.
    Return and simulate `1.00` / `USD` / `7372`: `card_inactive` (the ledger's
    provider-shaped failure reason is `CARD_INACTIVE`). Return and reconcile
-   with the operator token: settled `1000` minor units and three failures.
+   with the operator token: pending `1000` minor units, settled `0`, and three failures.
 4. Open `/audit`. Show “Chain valid”, the policy notes, and “emulated (offline)”
    authorization labels. This demonstrates our local emulator, not Airwallex
    enforcement.
@@ -289,17 +289,20 @@ throwing stub. These tests never call it. Fixture values are synthetic
 `pnpm demo:sandbox --preflight` checks balances, issuing configuration and the existing cardholder without card mutations or local store writes. `pnpm demo:sandbox cleanup` confirms each stored demo card and freezes every non-INACTIVE card. A stale approval-store lock fails with its age; after confirming the owner stopped, first remove `demo-output/sandbox/approvals.json.lock`, then run `pnpm demo:sandbox cleanup` and audit/verify before another demo. Cleanup needs to acquire that lock and cannot run until it is removed. Neither sandbox command has been live verified.
 
 Controls readback compares only the keys sent in the card request, recursively.
-Decimal amount strings and numbers compare numerically, arrays compare as sets,
-and object key order is irrelevant. Extra provider keys (including nested
+Decimal amount strings and numbers compare numerically, allowlists compare as
+exact sets, and object key order is irrelevant. Extra provider keys (including nested
 `remaining` values, validity dates, defaults and nulls) do not change the match
-decision. Extra array members (limits, MCCs or currencies) still fail closed
-and auto-freeze the card. Every sent key must still be present and equal;
+decision. Transaction limits are conjunctive: every sent interval/amount must
+be present in the same currency, while additional provider limits are accepted
+and recorded because they only restrict further. Extra MCCs or currencies still
+fail closed and auto-freeze the card. Every sent key must still be present;
 a missing MCC list or a changed limit fails closed, auto-freezes the card, and records
 `controls_mismatch`. The app's injected transport adapter keeps the raw controls
 object separately from validated card metadata so provider extras are preserved
 and missing sent controls can be recorded as mismatches. `controls_readback`
 retains the full redacted provider object in `actual`, including extras; there
-is no separate `extra` field. This behavior is verified offline, not live.
+is no separate `extra` field. Offline regression fixtures follow the response
+shapes confirmed by the orchestrator on 2026-11-12 (Beijing).
 
 On SIGINT or SIGTERM the demo waits for in-flight issuance, then cleans up and
 exits non-zero. A second signal exits immediately if issuance or cleanup hangs;

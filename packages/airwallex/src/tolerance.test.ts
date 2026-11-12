@@ -267,7 +267,7 @@ describe('reconciliation response tolerance', () => {
     }] }));
     const result = await client.listTransactions();
     expect(result.unparsed).toEqual([]);
-    expect(result.items[0]).toMatchObject({ transaction_amount: amount, billing_amount: amount, signedAmount: amount, merchant,
+    expect(result.items[0]).toMatchObject({ transaction_amount: amount, billing_amount: amount, signedAmount: typeof amount === 'number' ? -amount : amount.slice(1), merchant,
       transaction_type: 'REFUND', status: 'SUCCEEDED', card_transaction_id: 'card_transaction_test_01',
       card_transaction_lifecycle_id: 'lifecycle_test_01', extra: { future: { value: 'safe', note: '[redacted]' } },
     });
@@ -276,12 +276,13 @@ describe('reconciliation response tolerance', () => {
   it.each([
     ['REFUND', '12.34', '-12.34'],
     ['REVERSAL', 12.34, -12.34],
-    ['REFUND', '-1.00', '-1.00'],
+    ['REFUND', '-1.00', '1.00'],
     ['REVERSAL', 0, 0],
-    ['AUTHORIZATION', '12.34', '12.34'],
+    ['AUTHORIZATION', '12.34', '-12.34'],
+    ['AUTHORIZATION', -10, 10],
     ['refund', '12.34', '-12.34'],
     ['clearing_reversal', '8.50', '-8.50'],
-    ['PRE_AUTHORIZATION', '8.50', '8.50'],
+    ['PRE_AUTHORIZATION', '8.50', '-8.50'],
   ] as const)('derives signedAmount for %s amount %s without rewriting transaction_amount', async (type, amount, signed) => {
     const { client } = harness(() => json({ items: [{ ...baseTransaction, transaction_type: type, transaction_amount: amount }] }));
     const item = (await client.listTransactions()).items[0];

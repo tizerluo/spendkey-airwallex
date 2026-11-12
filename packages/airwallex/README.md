@@ -2,7 +2,8 @@
 
 Typed sandbox client for the Spendkey purchase agent. Responses are validated with
 Zod; response amounts remain decimal strings or numbers exactly as received. No API calls
-are made during tests. Full recorded-response validation is pending M1-G1.
+are made during tests. Synthetic fixtures follow response shapes confirmed by the
+orchestrator against the sandbox on 2026-11-12 (Beijing).
 
 ```ts
 import { AirwallexClient, loadAirwallexConfig } from '@sk/airwallex';
@@ -139,8 +140,10 @@ describes `nick_name` as a string but publishes no maximum length. We could not
 confirm a documented maximum. The helper uses a conservative **local** 50-character
 bound; approval-derived request IDs yield 48-character nicknames with the whole
 ID intact. This length bound is not a claim about the sandbox contract. Mask
-shape, returned request-ID availability, nickname length acceptance, and transaction
-ID joins still require owner-run live confirmation; no API was called for this task.
+shape (12 stars plus last four), ACTIVE HTTP 202 create responses with echoed
+request IDs/nicknames, HTTP 201 simulation responses, and nested transaction ID
+joins were confirmed by the orchestrator on 2026-11-12 (Beijing). No API was
+called by this implementation task.
 
 `listTransactions` parses each row independently. Valid rows retain merchant
 `name`, `category_code`, `city`, `country`, transaction type/status, transaction and
@@ -148,13 +151,20 @@ billing amounts with their original sign and decimal representation, both card
 transaction IDs, and redacted `extra` fields. Invalid rows go to `unparsed` with
 redaction; other rows and page metadata remain available. A usable row requires
 `transaction_id`, a signed decimal `transaction_amount`, and `transaction_currency`;
-other modeled fields may be absent. No assumption joins `transaction_id` to
-`card_transaction_id` until the live response confirms it. `transaction_amount`
-keeps the API value and its original sign. `signedAmount` is derived from
-`transaction_type`, compared case-insensitively: `REFUND`, `REVERSAL`, and any
-type ending in `_REVERSAL` (for example `CLEARING_REVERSAL`) with a positive API
-amount become negative. Every other row copies `transaction_amount`. Simulations
-keep both card transaction IDs and full merchant fields, tolerate future result
+other modeled fields may be absent. Observed events join simulations using
+`card_transaction_data.card_transaction_id`, falling back to the top-level card
+transaction ID, then `transaction_id` for older shapes. Listing deduplication
+continues to use `transaction_id`.
+
+`transaction_amount` keeps the provider value and original sign. Airwallex reports
+spend as negative and credits as positive. `signedAmount` is the derived spend
+amount in major units: **the inverse of `transaction_amount` regardless of type**.
+Thus `spendMinor = -signedProviderAmount` converted to minor units: -10 USD becomes
+1000 minor spend; a +3 USD credit becomes -300. No REFUND/REVERSAL type override
+is applied. Reconciliation totals SUCCEEDED spend as settled and PENDING spend
+as pending; FAILED rows are excluded from spend and counted. Agent window spend
+includes PENDING plus SUCCEEDED, with the final budget total floored at zero.
+Simulations keep both card transaction IDs and full merchant fields, tolerate future result
 strings and missing/invalid optional fields, and retain unknown fields in redacted
 `extra`. A missing `process_result` is unknown, not approved; an error-shaped 200
 parses with `process_result` left unset.
