@@ -1,21 +1,21 @@
 # Spendkey for Cards
 
-> **Status: offline emulator verified; live Airwallex sandbox not yet verified**
+> **Status: main line verified against the live Airwallex sandbox (demo environment) on 2026-11-12 (Beijing); offline emulator also verified.** Webhooks and the live `pnpm console` have not been run against Airwallex.
 
 Spendkey for Cards turns a purchase request into a policy decision, asks a person to approve the exact terms, and issues a virtual card whose limits, currency, and merchant category match that approval. It extends [Spendkey](https://spendkey.dev) from x402 payments to Airwallex card issuing. The policy rules and hash-chained audit log are reused here under the MIT license.
 
-Built for the Airwallex Agentic Banking Hackathon. Nothing in this repository has called the live Airwallex sandbox. Every Airwallex response seen so far came from synthetic fixtures or the offline emulator.
+Built for the Airwallex Agentic Banking Hackathon. Only the Airwallex sandbox (`api-demo.airwallex.com`) is used; no real money moves and production is refused.
 
 ## What it does
 
-The verified path is the offline DesignCo demo. Card issuance, declines and freeze below are produced by the local Airwallex emulator, not by Airwallex:
+The DesignCo main line. With `pnpm demo:sandbox` every Airwallex step below was run against the sandbox; with `pnpm demo:offline` the same steps run against a local emulator and are labelled emulated:
 
 1. Compare DesignCo offers. The annual plan is refused (`reserve_breach`). The monthly plan is `ask`. x402 prices are comparison only and are not card-payable.
 2. A person approves the exact terms by posting a one-time nonce.
-3. (Emulated) A virtual card is issued with those controls (monthly limit, USD, merchant category).
-4. (Emulated) The emulator approves one in-policy charge and declines two: over the limit, and a disallowed merchant category.
-5. (Emulated) The demo operator freezes the card. A further charge comes back `CARD_INACTIVE`.
-6. Reconciliation records the settled amount and the failed charges.
+3. Airwallex issues a virtual card with those controls (60 USD monthly limit, USD only, MCC 7372). The service reads the controls back and freezes the card if any sent control is missing or loosened.
+4. Airwallex's sandbox simulator approves a 10 USD charge and declines two: 61 USD (`LIMIT_EXCEEDED`) and MCC 5812 (`MERCHANT_CATEGORY_NOT_ALLOWED`).
+5. The demo operator freezes the card (`INACTIVE`). A further charge comes back `CARD_INACTIVE`.
+6. Reconciliation reads the card's transactions back from Airwallex: the approved charge is pending, the three declines are failed.
 7. The hash chain verifies. A tampered copy does not.
 
 The offline script can auto-approve as `demo-operator`. That fact is written on the audit log. The console waits for the human nonce.
@@ -53,7 +53,7 @@ The operator token is for card operations (simulate, freeze, reconcile, issuance
 
 ## What is emulated / simulated / observed
 
-How a run is labelled. The sandbox columns are the planned live meaning. They have not been observed against Airwallex.
+How a run is labelled. The `sandbox` row was observed with `demo:sandbox`; the `console_sandbox` row has not yet been run live.
 
 | Mode | Emulated | Simulated | Observed |
 | --- | --- | --- | --- |
@@ -65,24 +65,33 @@ If the ledger has no `run_started` event, the console says “mode unknown” an
 
 ## Live sandbox
 
-Not yet run. Planned commands, once credentials are present only in the environment:
+Credentials are read from the environment only (`AIRWALLEX_CLIENT_ID`, `AIRWALLEX_API_KEY`, plus an existing `AIRWALLEX_CARDHOLDER_ID`). Never put them in files in this repository or on the command line.
 
 ```bash
-pnpm demo:sandbox --preflight
-pnpm demo:sandbox
-pnpm demo:sandbox cleanup
-pnpm console
+pnpm demo:sandbox --preflight   # read-only: balances, issuing config, cardholder
+pnpm demo:sandbox               # the main line above, against the sandbox
+pnpm demo:sandbox cleanup       # freeze any demo card that is not INACTIVE
 ```
 
-`pnpm console` requires `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_API_KEY` and `AIRWALLEX_CARDHOLDER_ID` in the environment and calls the Airwallex sandbox at startup. Open it at <http://127.0.0.1:8787> (not `localhost`; the host check rejects it). State stays in the gitignored `console-data/` directory; the operator terminal prints the approval nonce and the operator token once.
+Verified on 2026-11-12 (Beijing) in the Airwallex demo environment:
 
-Do not treat a green offline demo as evidence that Airwallex accepted a card, enforced controls, or returned a transaction.
+| Step | Observed |
+| --- | --- |
+| Preflight | Login, USD balance, issuing primary currency USD, cardholder `READY`. |
+| Issue card | `202`, card `ACTIVE` immediately, masked number `************dddd`, `request_id` echoed; lookup by `request_id` finds the card. |
+| Controls readback | Sent controls returned unchanged, plus provider defaults (empty brand/country lists and an extra `PER_TRANSACTION` limit, which only tightens). |
+| Simulations | 10 USD/7372 `APPROVED`; 61 USD `LIMIT_EXCEEDED`; MCC 5812 `MERCHANT_CATEGORY_NOT_ALLOWED`; EUR `CURRENCY_NOT_ALLOWED` (client smoke test); after freeze `CARD_INACTIVE`. |
+| Transactions | Listed with merchant name, city, country and MCC; spend amounts are negative numbers; the approved authorization is `PENDING`, declines are `FAILED`. |
+| Cleanup | Every card created during testing is `INACTIVE`. |
+
+Not yet run live: `pnpm console` (it needs the same environment and calls the sandbox at startup; open <http://127.0.0.1:8787>, not `localhost`), webhook delivery, and the interrupt (Ctrl-C) cleanup path.
 
 ## Known limitations
 
 - The hash chain is tamper-evident only when a head hash is published outside the file. Rewriting the file and recomputing hashes still verifies without that anchor.
 - Webhooks are optional. Polling is the reconciliation path. Webhook delivery has not been verified live.
-- The client talks only to the Airwallex sandbox host. Production is refused. The live sandbox itself has not been run.
+- Sandbox simulations are not real card-network traffic; settlement (`SUCCEEDED`) was not observed within the demo run, so settled totals stay 0 and the approved charge shows as pending.
+- The client talks only to the Airwallex sandbox host. Production is refused.
 - `MONTHLY` cards renew their limit each month until frozen. There is no `active_to`.
 
 ## Repository layout
@@ -92,7 +101,7 @@ Do not treat a green offline demo as evidence that Airwallex accepted a card, en
 - `packages/offers` (`@sk/offers`) — curated and x402 offer snapshots, offline.
 - `packages/compare` (`@sk/compare`) — integer cost comparison of those offers.
 - `packages/policy` (`@sk/policy`) — reserve, budget, commitment, region, and human approval terms.
-- `packages/airwallex` (`@sk/airwallex`) — sandbox-only issuing client. Not yet called live.
+- `packages/airwallex` (`@sk/airwallex`) — sandbox-only issuing client, verified against the sandbox.
 - `packages/ledger` (`@sk/ledger`) — hash-chained card audit log and verify CLI.
 - `packages/agent` (`@sk/agent`) — asks or refuses; cannot approve, issue, or freeze.
 - `packages/app` (`@sk/app`) — approval service, console views, and the offline demo.
@@ -105,7 +114,7 @@ Node 22.x and pnpm 10.
 pnpm verify
 ```
 
-That runs the secret scan, typecheck, lint, and the offline tests. Live sandbox runs, when they happen, read credentials from the environment and only talk to `https://api-demo.airwallex.com`. Never commit credentials.
+That runs the secret scan, typecheck, lint, and the offline tests. Live sandbox runs read credentials from the environment and only talk to `https://api-demo.airwallex.com`. Never commit credentials.
 
 ## License
 
