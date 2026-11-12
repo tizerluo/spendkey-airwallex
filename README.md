@@ -12,7 +12,7 @@ The DesignCo main line. With `pnpm demo:sandbox` every Airwallex step below was 
 
 1. Compare DesignCo offers. The annual plan is refused (`reserve_breach`). The monthly plan is `ask`. x402 prices are comparison only and are not card-payable.
 2. A person approves the exact terms by posting a one-time nonce.
-3. Airwallex issues a virtual card with those controls (60 USD monthly limit, USD only, MCC 7372). The service reads the controls back and freezes the card if any sent control is missing or loosened.
+3. Airwallex issues a virtual card with those controls (60 USD monthly limit, USD only, MCC 7372). The service reads the controls back and freezes the card if any sent control is missing or changed.
 4. Airwallex's sandbox simulator approves a 10 USD charge and declines two: 61 USD (`LIMIT_EXCEEDED`) and MCC 5812 (`MERCHANT_CATEGORY_NOT_ALLOWED`).
 5. The demo operator freezes the card (`INACTIVE`). A further charge comes back `CARD_INACTIVE`.
 6. Reconciliation reads the card's transactions back from Airwallex: the approved charge is pending, the three declines are failed.
@@ -79,7 +79,7 @@ Verified on 2026-11-12 (Beijing) in the Airwallex demo environment:
 | --- | --- |
 | Preflight | Login, USD balance, issuing primary currency USD, cardholder `READY`. |
 | Issue card | `202`, card `ACTIVE` immediately, masked number `************dddd`, `request_id` echoed; lookup by `request_id` finds the card. |
-| Controls readback | Sent controls returned unchanged, plus provider defaults (empty brand/country lists and an extra `PER_TRANSACTION` limit, which only tightens). |
+| Controls readback | Sent controls returned unchanged, plus provider defaults (empty brand/country lists and an extra `PER_TRANSACTION` limit, which can only tighten because limits are conjunctive). |
 | Simulations | 10 USD/7372 `APPROVED`; 61 USD `LIMIT_EXCEEDED`; MCC 5812 `MERCHANT_CATEGORY_NOT_ALLOWED`; EUR `CURRENCY_NOT_ALLOWED` (client smoke test); after freeze `CARD_INACTIVE`. |
 | Transactions | Listed with merchant name, city, country and MCC; spend amounts are negative numbers; the approved authorization is `PENDING`, declines are `FAILED`. |
 | Cleanup | Every card created during testing is `INACTIVE`. |

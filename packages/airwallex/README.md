@@ -156,8 +156,8 @@ other modeled fields may be absent. Observed events join simulations using
 transaction ID, then `transaction_id` for older shapes. Listing deduplication
 continues to use `transaction_id`.
 
-`transaction_amount` keeps the provider value and original sign. Airwallex reports
-spend as negative and credits as positive. `signedAmount` is the derived spend
+`transaction_amount` keeps the provider value and original sign. Live sandbox spend was
+observed as negative; credits are assumed positive (not observed live). `signedAmount` is the derived spend
 amount in major units: **the inverse of `transaction_amount` regardless of type**.
 Thus `spendMinor = -signedProviderAmount` converted to minor units: -10 USD becomes
 1000 minor spend; a +3 USD credit becomes -300. No REFUND/REVERSAL type override
