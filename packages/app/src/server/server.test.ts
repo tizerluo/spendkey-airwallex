@@ -56,7 +56,7 @@ async function start(service: ApprovalService, webhookSecret?: string) {
   const server = createConsoleServer(service, webhookSecret ? { webhookSecret } : {}); servers.push(server);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('test_listen_failed');
-  return async (path: string, body?: unknown, headers: Record<string, string> = {}, raw?: string) => {
+  const send = async (path: string, body?: unknown, headers: Record<string, string> = {}, raw?: string) => {
     const data = raw ?? (body === undefined ? undefined : JSON.stringify(body));
     return new Promise<{ status: number; text: string; headers: import('node:http').IncomingHttpHeaders }>((resolve, reject) => {
       const requestHeaders = { ...(data === undefined ? {} : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }), ...headers };
@@ -70,6 +70,7 @@ async function start(service: ApprovalService, webhookSecret?: string) {
       req.on('error', reject); req.end(data);
     });
   };
+  return Object.assign(send, { port: address.port });
 }
 
 describe('durable approval state machine', () => {
@@ -313,7 +314,7 @@ describe('HTTP approval boundary and console', () => {
     for (const path of ['/', '/approvals/request_test_01', '/audit']) {
       const response = await send(path);
       expect(response.status).toBe(200); expect(response.headers['content-security-policy']).toBe(CONSOLE_CSP);
-      expect(response.headers['x-content-type-options']).toBe('nosniff'); expect(response.headers['referrer-policy']).toBe('no-referrer');
+      expect(response.headers['x-content-type-options']).toBe('nosniff'); expect(response.headers['referrer-policy']).toBe('same-origin');
       expect(response.text).not.toContain(f.nonce); expect(response.text).not.toContain(f.store.get(f.request.approvalRequestId)!.nonceHash);
     }
     expect(JSON.parse((await send('/approvals', f.request)).text)).toEqual({ id: 'request_test_01' });
@@ -353,6 +354,39 @@ describe('HTTP approval boundary and console', () => {
     expect((await send('/', undefined, { Host: 'untrusted.example:8787' })).status).toBe(403);
     const form = new URLSearchParams(f.fields).toString();
     expect((await send('/approvals/request_test_01/approve', {}, { 'Content-Type': 'application/x-www-form-urlencoded' }, form)).status).toBe(303);
+  });
+  it('sends Referrer-Policy same-origin and renders the same-origin referrer meta tag', async () => {
+    const f = await fixture(); const send = await start(f.service);
+    for (const path of ['/', '/approvals/request_test_01', '/audit']) {
+      const response = await send(path);
+      expect(response.status).toBe(200);
+      expect(response.headers['referrer-policy']).toBe('same-origin');
+      expect(response.text).toContain('<meta name="referrer" content="same-origin">');
+    }
+    const exported = await send('/audit.jsonl');
+    expect(exported.status).toBe(200); expect(exported.headers['referrer-policy']).toBe('same-origin');
+    const missing = await send('/missing');
+    expect(missing.status).toBe(404); expect(missing.headers['referrer-policy']).toBe('same-origin');
+  });
+  it('rejects a POST with Origin null as invalid_origin', async () => {
+    const f = await fixture(); const send = await start(f.service);
+    const response = await send('/approvals/request_test_01/approve', f.fields, { Origin: 'null' });
+    expect(response.status).toBe(403);
+    expect(JSON.parse(response.text)).toEqual({ error: 'invalid_origin' });
+    expect(response.headers['referrer-policy']).toBe('same-origin');
+    expect(f.fake.createCalls).toBe(0);
+  });
+  it('accepts a POST whose Origin matches the loopback Host', async () => {
+    const f = await fixture(); const send = await start(f.service);
+    const form = new URLSearchParams(f.fields).toString();
+    const response = await send('/approvals/request_test_01/approve', {}, {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Origin: `http://127.0.0.1:${send.port}`,
+    }, form);
+    expect(response.status).toBe(303);
+    expect(response.headers['location']).toBe('/approvals/request_test_01');
+    expect(response.headers['referrer-policy']).toBe('same-origin');
+    expect(f.fake.createCalls).toBe(1);
   });
 });
 

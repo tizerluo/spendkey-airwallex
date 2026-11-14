@@ -33,7 +33,7 @@ function stringField(input: Record<string, unknown>, name: string): string { ret
 function respond(response: ServerResponse, status: number, body: string, html = false): void {
   if (response.headersSent) { response.destroy(); return; }
   response.writeHead(status, { 'Content-Type': html ? 'text/html; charset=utf-8' : 'application/json; charset=utf-8',
-    'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'Cache-Control': 'no-store',
     ...(html ? { 'Content-Security-Policy': CONSOLE_CSP } : {}),
   });
   response.end(body);
@@ -82,7 +82,7 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
         try { body = ledger.read().map(event => JSON.stringify(event) + '\n').join(''); }
         catch { throw new ServiceError('ledger_unverified', 409); }
         response.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Content-Type-Options': 'nosniff',
-          'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store' });
+          'Referrer-Policy': 'same-origin', 'Cache-Control': 'no-store' });
         response.end(body); return;
       }
       if (method !== 'POST') throw new ServiceError('not_found', 404);
@@ -126,7 +126,7 @@ export function createConsoleServer(service: ApprovalService, options: { webhook
           ...(typeof input['merchantCategoryCode'] === 'string' ? { merchantCategoryCode: input['merchantCategoryCode'] } : {}),
         });
         // POST/redirect/GET makes browser refresh safe.
-        response.writeHead(303, { Location: `/approvals/${id}`, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+        response.writeHead(303, { Location: `/approvals/${id}`, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin' });
         response.end(); return;
       }
       // All operator operations, including future recovery routes, belong below this shared guard.

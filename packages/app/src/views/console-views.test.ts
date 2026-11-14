@@ -464,6 +464,20 @@ describe('renderAuditPage', () => {
   });
 });
 
+describe('referrer policy', () => {
+  it('renders a same-origin referrer meta tag on every document', () => {
+    const pages = [
+      renderIndexPage({ approvals: [] }),
+      renderApprovalPage(sampleApproval(), { csrfToken: CSRF }),
+      renderAuditPage(sampleAudit()),
+    ];
+    for (const html of pages) {
+      expect(html).toContain('<meta name="referrer" content="same-origin">');
+      expect(html).not.toContain('no-referrer');
+    }
+  });
+});
+
 describe('CONSOLE_CSP', () => {
   it('exports a policy that allows inline styles and no scripts', () => {
     expect(CONSOLE_CSP).toBe(
