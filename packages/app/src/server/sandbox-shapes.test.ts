@@ -18,7 +18,8 @@ function fixture(name: string): unknown {
 function readback() {
   return (fixture('card-get') as { authorization_controls: AuthorizationControls & Record<string, unknown> }).authorization_controls;
 }
-async function setup(transform?: (body: Record<string, unknown>, path: string) => void) {
+async function setup(transform?: (body: Record<string, unknown>, path: string) => void,
+  allowedTransactionCount: ApprovalRequest['allowedTransactionCount'] = 'MULTIPLE') {
   const fake = createFakeAirwallex({ now });
   const client = createAppAirwallexClient(loadAirwallexConfig({ AIRWALLEX_CLIENT_ID: 'test-client-id', AIRWALLEX_API_KEY: 'test-api-key' }), async (target, init) => {
     const response = await fake.fetch(target, init);
@@ -34,7 +35,7 @@ async function setup(transform?: (body: Record<string, unknown>, path: string) =
     cardholderId: 'cardholder_test_01', printNonce: line => { nonce = line.split(': ')[1]!; }, printOperatorToken: () => {} });
   const request: ApprovalRequest = { approvalRequestId: 'request_test_live_shapes', offerId: 'offer_test_monthly', vendor: 'Synthetic vendor',
     product: 'Synthetic plan', plan: 'monthly', rail: 'card', currency: 'USD', amountMinor: 6000, interval: 'MONTHLY',
-    allowedTransactionCount: 'MULTIPLE', merchantCategoryCode: '7372', commitmentMonths: 0, priceStatus: 'price_unverified',
+    allowedTransactionCount, merchantCategoryCode: '7372', commitmentMonths: 0, priceStatus: 'price_unverified',
     createdAt: at, expiresAt: '2030-01-01T00:15:00.000Z' };
   recordDecision(ledger, request); await service.submit(request);
   const grant = () => service.grant(request.approvalRequestId, { nonce, csrf: service.get(request.approvalRequestId).csrf, presentedTermsHash: termsHash(request) });
@@ -69,6 +70,23 @@ describe('sandbox-confirmed synthetic controls', () => {
     },
   );
 
+  it.each([['SINGLE', 'MULTIPLE'], ['MULTIPLE', 'SINGLE']] as const)(
+    'freezes on sent count %s read back as %s', async (sent, returned) => {
+      const actual = readback();
+      actual.allowed_transaction_count = returned;
+      const f = await setup((body, path) => {
+        if (path === '/api/v1/issuing/cards/card_test_1') body['authorization_controls'] = actual;
+      }, sent);
+      await expect(f.grant()).rejects.toMatchObject({ code: 'controls_mismatch' });
+      expect(f.fake.cards.get('card_test_1')).toMatchObject({ card_status: 'INACTIVE',
+        authorization_controls: { allowed_transaction_count: sent } });
+      expect(f.ledger.read().find(({ event }) => event.kind === 'controls_readback')?.event)
+        .toMatchObject({ matches: false, expected: { allowed_transaction_count: sent }, actual: { allowed_transaction_count: returned } });
+      expect(f.ledger.read().some(({ event }) => event.kind === 'card_frozen')).toBe(true);
+      expect(verifyChain(f.ledger.read()).ok).toBe(true);
+    },
+  );
+
   it('requires every sent limit, including interval and amount, while accepting further conjunctive limits', () => {
     const actual = readback();
     const expected = structuredClone(actual);
@@ -80,6 +98,31 @@ describe('sandbox-confirmed synthetic controls', () => {
 });
 
 describe('sandbox-confirmed synthetic transaction accounting', () => {
+  it.each([['AUTHORIZATION', '3.00'], ['CLEARING', 3], ['purchase', '3.00'],
+    ['REFUND', '-3.00'], ['clearing_reversal', -3]] as const)(
+    'fails closed without reducing prior spend for contradicting %s amount %s', async (type, amount) => {
+      let contradict = false;
+      const row = { transaction_id: 'transaction_test_sign', card_id: 'card_test_1',
+        transaction_type: 'AUTHORIZATION', transaction_amount: '-10.00', transaction_currency: 'USD', status: 'SUCCEEDED' };
+      const f = await setup((body, path) => {
+        if (path === '/api/v1/issuing/transactions') {
+          body['items'] = [contradict ? { ...row, transaction_type: type, transaction_amount: amount } : row];
+          body['has_more'] = false;
+        }
+      });
+      await f.grant();
+      await f.loop.reconcile('card_test_1');
+      expect(spentInWindowMinor(f.ledger, 'USD', monthWindow(now()))).toBe(1000);
+      contradict = true;
+      await expect(f.loop.reconcile('card_test_1')).rejects.toMatchObject({ code: 'reconciliation_unparsed_transactions' });
+      expect(spentInWindowMinor(f.ledger, 'USD', monthWindow(now()))).toBe(1000);
+      expect(f.ledger.read().filter(({ event }) => event.kind === 'reconciliation')).toHaveLength(1);
+      expect(f.ledger.read().find(({ event }) => event.kind === 'raw_response' && event.endpoint === 'reconcile/unparsed')?.event)
+        .toMatchObject({ body: [{ transaction_id: row.transaction_id, transaction_type: type, transaction_amount: amount }] });
+      expect(verifyChain(f.ledger.read()).ok).toBe(true);
+    },
+  );
+
   it('joins nested card IDs and totals pending, settled and positive credits while excluding failed spend', async () => {
     const items = (fixture('transactions') as { items: Record<string, unknown>[] }).items;
     const credits = (fixture('transactions-credit') as { items: Record<string, unknown>[] }).items;

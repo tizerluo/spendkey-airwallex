@@ -15,7 +15,7 @@ const input = createCardInputSchema.parse({
 });
 const baseCard = { card_id: 'card_test_01', card_status: 'ACTIVE' };
 const baseTransaction = { transaction_id: 'transaction_test_01', card_id: 'card_test_01',
-  transaction_type: 'REFUND', status: 'SUCCEEDED', transaction_amount: '-12.34', transaction_currency: 'USD' };
+  transaction_type: 'REFUND', status: 'SUCCEEDED', transaction_amount: '12.34', transaction_currency: 'USD' };
 const merchant = { name: 'Test Merchant', category_code: '7372', city: 'Example City', country: 'US' };
 function harness(respond: (url: URL) => Response) {
   const calls: URL[] = [];
@@ -260,14 +260,14 @@ describe('card recovery', () => {
 });
 
 describe('reconciliation response tolerance', () => {
-  it.each(['-12.34', -12.34])('keeps signed refund amount %s, merchant, lifecycle and redacted unknowns', async amount => {
+  it.each(['12.34', 12.34])('keeps signed refund amount %s, merchant, lifecycle and redacted unknowns', async amount => {
     const { client } = harness(() => json({ items: [{ ...baseTransaction, transaction_amount: amount, billing_amount: amount,
       merchant, card_transaction_id: 'card_transaction_test_01', card_transaction_lifecycle_id: 'lifecycle_test_01',
       future: { value: 'safe', token: 'test-token', note: 'test-api-key' },
     }] }));
     const result = await client.listTransactions();
     expect(result.unparsed).toEqual([]);
-    expect(result.items[0]).toMatchObject({ transaction_amount: amount, billing_amount: amount, signedAmount: typeof amount === 'number' ? -amount : amount.slice(1), merchant,
+    expect(result.items[0]).toMatchObject({ transaction_amount: amount, billing_amount: amount, signedAmount: typeof amount === 'number' ? -amount : `-${amount}`, merchant,
       transaction_type: 'REFUND', status: 'SUCCEEDED', card_transaction_id: 'card_transaction_test_01',
       card_transaction_lifecycle_id: 'lifecycle_test_01', extra: { future: { value: 'safe', note: '[redacted]' } },
     });
@@ -276,9 +276,8 @@ describe('reconciliation response tolerance', () => {
   it.each([
     ['REFUND', '12.34', '-12.34'],
     ['REVERSAL', 12.34, -12.34],
-    ['REFUND', '-1.00', '1.00'],
     ['REVERSAL', 0, 0],
-    ['AUTHORIZATION', '12.34', '-12.34'],
+    ['AUTHORIZATION', '-12.34', '12.34'],
     ['AUTHORIZATION', -10, 10],
     ['refund', '12.34', '-12.34'],
     ['clearing_reversal', '8.50', '-8.50'],

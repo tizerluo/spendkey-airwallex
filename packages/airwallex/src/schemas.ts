@@ -187,7 +187,7 @@ export const simulationSchema = z.preprocess(dropPanLike, withExtra({
   network_transaction_id: z.string().optional().catch(undefined),
 }));
 export type SimulationResult = z.infer<typeof simulationSchema>;
-/** Spend convention: negate the provider amount, regardless of type. Negative debits
+/** Spend convention: negate the validated provider amount. Negative debits
  * become positive spend; positive credits reduce spend. Preserve decimal precision. */
 function spendAmountFor(amount: Amount): Amount {
   if (typeof amount === 'number') return amount === 0 ? 0 : -amount;
@@ -207,7 +207,15 @@ export const transactionSchema = z.preprocess(dropPanLike, withExtra({
   merchant: responseMerchantSchema.optional(), merchant_info: responseMerchantSchema.optional(),
   failure_reason: z.string().nullable().optional(), transaction_date: z.string().optional(),
   masked_card_number: maskedNumberSchema.optional().catch(undefined), panLikeValueDropped: z.literal(true).optional(),
-})).transform(transaction => ({
+})).refine(transaction => {
+  const amount = String(transaction.transaction_amount);
+  if (/^-?0+(?:\.0+)?$/.test(amount)) return true;
+  const type = transaction.transaction_type?.toUpperCase();
+  const negative = amount.startsWith('-');
+  if (type === 'AUTHORIZATION' || type === 'CLEARING' || type === 'PURCHASE') return negative;
+  if (type === 'REFUND' || type?.includes('REVERSAL')) return !negative;
+  return true;
+}, { message: 'Transaction amount sign contradicts transaction type', path: ['transaction_amount'] }).transform(transaction => ({
   ...transaction,
   signedAmount: spendAmountFor(transaction.transaction_amount),
 }));

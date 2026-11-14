@@ -158,7 +158,7 @@ continues to use `transaction_id`.
 
 `transaction_amount` keeps the provider value and original sign. Live sandbox spend was
 observed as negative; credits are assumed positive (not observed live). `signedAmount` is the derived spend
-amount in major units: **the inverse of `transaction_amount` regardless of type**.
+amount in major units: **the inverse of `transaction_amount`**, with sign/type contradictions rejected as `unparsed`.
 Thus `spendMinor = -signedProviderAmount` converted to minor units: -10 USD becomes
 1000 minor spend; a +3 USD credit becomes -300. No REFUND/REVERSAL type override
 is applied. Reconciliation totals SUCCEEDED spend as settled and PENDING spend

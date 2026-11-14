@@ -243,7 +243,7 @@ describe('independent recovery pagination', () => {
 });
 
 describe('independent signed transaction amounts', () => {
-  it('uses the inverse provider sign regardless of transaction type', async () => {
+  it('uses the inverse provider sign and rejects sign/type contradictions', async () => {
     const rows = [
       { transaction_id: 'transaction_refund', transaction_type: 'REFUND', transaction_amount: '3.00', transaction_currency: 'USD' },
       { transaction_id: 'transaction_refund_lower', transaction_type: 'refund', transaction_amount: '3.00', transaction_currency: 'USD' },
@@ -260,8 +260,40 @@ describe('independent signed transaction amounts', () => {
     expect(byId.get('transaction_refund_lower')).toMatchObject({ transaction_amount: '3.00', signedAmount: '-3.00' });
     expect(byId.get('transaction_reversal')).toMatchObject({ transaction_amount: 3, signedAmount: -3 });
     expect(byId.get('transaction_clearing')).toMatchObject({ transaction_amount: '1.25', signedAmount: '-1.25' });
-    expect(byId.get('transaction_purchase')).toMatchObject({ transaction_amount: '3.00', signedAmount: '-3.00' });
-    expect(byId.get('transaction_negative_refund')).toMatchObject({ transaction_amount: '-3.00', signedAmount: '3.00' });
+    expect(byId.has('transaction_purchase')).toBe(false);
+    expect(byId.has('transaction_negative_refund')).toBe(false);
+    expect(result.unparsed).toEqual([rows[4], rows[5]]);
     expect(byId.get('transaction_zero_refund')).toMatchObject({ transaction_amount: '0', signedAmount: '0' });
+  });
+
+  it.each(['AUTHORIZATION', 'CLEARING', 'PURCHASE', 'authorization', 'Clearing', 'purchase',
+    'REFUND', 'refund', 'REVERSAL', 'clearing_reversal', 'AUTHORIZATION_REVERSAL', 'REVERSAL_ADJUSTMENT'])(
+    'rejects contradicting numeric and decimal-string amounts for %s', async type => {
+      const credit = type.toUpperCase() === 'REFUND' || type.toUpperCase().includes('REVERSAL');
+      const rows = [3, '3.00', '0003.000', '0.000001'].map((amount, index) => ({
+        transaction_id: `transaction_test_contradiction_${index}`, transaction_type: type,
+        transaction_amount: credit ? typeof amount === 'number' ? -amount : `-${amount}` : amount,
+        transaction_currency: 'USD',
+      }));
+      const { client } = makeClient(() => json({ items: rows, has_more: false }));
+      expect(await client.listTransactions()).toEqual({ items: [], unparsed: rows, has_more: false });
+    },
+  );
+
+  it.each([
+    ['AUTHORIZATION', -3, 3], ['authorization', '-3.00', '3.00'], ['CLEARING', '-0003.000', '0003.000'],
+    ['PURCHASE', '-0.000001', '0.000001'], ['REFUND', 3, -3], ['refund', '0003.000', '-0003.000'],
+    ['clearing_reversal', '0.000001', '-0.000001'],
+    ['AUTHORIZATION', 0, 0], ['PURCHASE', '0.00', '0.00'], ['CLEARING', '-000.000', '-000.000'],
+    ['REFUND', 0, 0], ['REFUND', '-0.00', '-0.00'], ['REVERSAL', '000.000', '000.000'],
+    ['UNKNOWN', '-3.00', '3.00'], ['UNKNOWN', '3.00', '-3.00'],
+    [undefined, '-3.00', '3.00'], [undefined, '3.00', '-3.00'],
+  ] as const)('preserves accepted %s amount %s as signedAmount %s', async (type, amount, signedAmount) => {
+    const row = { transaction_id: 'transaction_test_valid', transaction_type: type,
+      transaction_amount: amount, transaction_currency: 'USD' };
+    const { client } = makeClient(() => json({ items: [row] }));
+    const result = await client.listTransactions();
+    expect(result.unparsed).toEqual([]);
+    expect(result.items).toMatchObject([{ transaction_amount: amount, signedAmount }]);
   });
 });

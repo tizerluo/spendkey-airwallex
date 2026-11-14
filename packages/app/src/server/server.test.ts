@@ -517,7 +517,7 @@ describe('signed webhooks and transaction loop', () => {
     expect(f.ledger.read().some(({ event }) => event.kind === 'reconciliation')).toBe(false);
   });
   it.each([
-    ['REFUND', '3.00'], ['REVERSAL', 3], ['REFUND', '-3.00'], ['REVERSAL', -3],
+    ['REFUND', '3.00'], ['REVERSAL', 3],
   ])('uses the provider sign for parsed %s amounts (%s) in totals and audit events', async (transactionType, amount) => {
     const credit = Number(amount) > 0;
     const f = await fixture(); await f.grant();
